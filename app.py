@@ -56,7 +56,7 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Smart Auto-Retry Billing & Stock System")
+st.title("💊 LCB Pharma - Auto Dynamic Model Detection System")
 
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
@@ -76,10 +76,10 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (AUTO FALLBACK MODEL SEARCH)
+# 2. AI PHOTO SCANNER (DYNAMIC GOOGLE MODEL DISCOVERY)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Bill with Smart Google AI")
+    st.subheader("📸 Scan Handwritten Bill with Auto Google AI")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
@@ -89,54 +89,47 @@ elif menu == "📸 AI Photo Scanner":
             if not api_key:
                 st.error("API Key nahi mili! Streamlit Secrets check karein.")
             else:
-                with st.spinner("🔍 Best active Google Model search & scanning in progress..."):
+                with st.spinner("🔍 Google API se active models ki list auto-detect ki ja rahi hai..."):
                     try:
                         genai.configure(api_key=api_key)
                         
-                        # Priority list of robust working models
-                        candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash-exp", "gemini-1.5-pro"]
+                        # Fetch active models directly from Google API
+                        valid_models = []
+                        for m in genai.list_models():
+                            if 'generateContent' in m.supported_generation_methods:
+                                model_id = m.name.replace("models/", "")
+                                valid_models.append(model_id)
                         
-                        # Fetch available models from account dynamically
-                        dynamic_models = []
-                        try:
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    name = m.name.replace("models/", "")
-                                    if "2.5-flash" not in name:  # Skip buggy/deprecated names
-                                        dynamic_models.append(name)
-                        except Exception:
-                            pass
+                        # Preferred stable model priority list
+                        preferred_order = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
                         
-                        # Combine lists ensuring fallback
-                        all_candidates = list(dict.fromkeys(candidate_models + dynamic_models))
+                        selected_model = None
+                        # Check preferred models against valid models returned by Google API
+                        for pref in preferred_order:
+                            if any(pref in v for v in valid_models):
+                                selected_model = pref
+                                break
                         
-                        image = Image.open(uploaded_file)
-                        image.thumbnail((1024, 1024))
-                        
-                        prompt = """Extract product details from this pharmaceutical bill/slip image.
+                        if not selected_model and valid_models:
+                            selected_model = valid_models[0]
+                            
+                        if not selected_model:
+                            st.error("Google API se koi valid model nahi mila. Kripya API Key check karein.")
+                        else:
+                            st.info(f"🤖 Google API Verified Model Selected: `{selected_model}`")
+                            
+                            image = Image.open(uploaded_file)
+                            image.thumbnail((1024, 1024))
+                            
+                            prompt = """Extract product details from this pharmaceutical bill/slip image.
 Return ONLY valid JSON in this exact structure with double quotes:
 [{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
-                        response_text = None
-                        successful_model = None
-
-                        # Loop through models until one works!
-                        for model_name in all_candidates:
-                            try:
-                                model = genai.GenerativeModel(model_name)
-                                response = model.generate_content([prompt, image])
-                                if response and response.text:
-                                    response_text = response.text.strip()
-                                    successful_model = model_name
-                                    break
-                            except Exception as model_err:
-                                continue  # Try next available model automatically
-                        
-                        if response_text and successful_model:
-                            st.info(f"🤖 Successfully Scanned using Google Model: `{successful_model}`")
+                            model = genai.GenerativeModel(selected_model)
+                            response = model.generate_content([prompt, image])
+                            raw_text = response.text.strip()
                             
-                            # Clean markdown formatting if added by model
-                            cleaned = response_text.replace("```json", "").replace("```", "").strip()
+                            cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                             json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
                             target_str = json_match.group(0) if json_match else cleaned
                             
@@ -154,9 +147,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                                 st.success("✅ AI Scan Successful!")
                             else:
                                 st.error("Data parse nahi ho saka. Raw Output:")
-                                st.code(response_text)
-                        else:
-                            st.error("Koi bhi active Google Gemini model response nahi de raha hai. Kripya API Key check karein.")
+                                st.code(raw_text)
 
                     except Exception as e:
                         st.error(f"Scan Error: {e}")
