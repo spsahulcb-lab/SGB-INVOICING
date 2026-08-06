@@ -14,7 +14,7 @@ st.set_page_config(page_title="Pharma Stock & Billing App", layout="wide")
 STOCK_FILE = "master_stock_inventory.csv"
 SALES_FILE = "sales_history.csv"
 
-# Initialize Master Stock with Full Pharma Columns
+# Initialize Master Stock
 if not os.path.exists(STOCK_FILE):
     df_init = pd.DataFrame({
         "Product Name": ["WOMENSA SYRUP", "PANCHALIV SYRUP", "ALOBYD-P", "AGEXPRO PWD", "B-RICH TAB"],
@@ -56,7 +56,7 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Speed Optimized Billing & Stock System")
+st.title("💊 LCB Pharma - Auto Google Model Billing & Stock System")
 
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
@@ -76,51 +76,58 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (DYNAMIC MODEL AUTO-SELECT)
+# 2. AI PHOTO SCANNER (AUTO GOOGLE MODEL SEARCH)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Bill with Gemini AI")
+    st.subheader("📸 Scan Handwritten Bill with Auto Google AI")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
-        st.image(uploaded_file, caption="Uploaded Slip", width=300)
+        st.image(uploaded_file, caption="Uploaded Slip", width=350)
         
-        if st.button("🚀 Process Slip with AI"):
+        if st.button("🚀 Auto-Scan Slip with Google AI"):
             if not api_key:
                 st.error("API Key nahi mili! Streamlit Secrets check karein.")
             else:
-                with st.spinner("⚡ Auto-detecting AI Model & Scanning Slip..."):
+                with st.spinner("🔍 Google se auto-search kar ke best model chuna ja raha hai..."):
                     try:
                         genai.configure(api_key=api_key)
                         
-                        # Compress image to speed up upload
-                        image = Image.open(uploaded_file)
-                        image.thumbnail((1024, 1024))
+                        # Step 1: Automatically fetch available models from Google
+                        available_models = []
+                        for m in genai.list_models():
+                            if 'generateContent' in m.supported_generation_methods:
+                                # Clean model name format
+                                name = m.name.replace("models/", "")
+                                available_models.append(name)
                         
-                        prompt = """Extract product details from this pharmaceutical bill/slip image.
+                        if not available_models:
+                            st.error("Google API se koi active vision model nahi mila.")
+                        else:
+                            # Step 2: Auto-pick the best flash model (2.5 -> 1.5 -> fallback)
+                            selected_model = None
+                            for m in available_models:
+                                if "2.5-flash" in m or "1.5-flash" in m:
+                                    selected_model = m
+                                    break
+                            
+                            if not selected_model:
+                                selected_model = available_models[0]
+                                
+                            st.info(f"🤖 Auto-Selected Google Model: `{selected_model}`")
+                            
+                            image = Image.open(uploaded_file)
+                            image.thumbnail((1024, 1024))
+                            
+                            prompt = """Extract product details from this pharmaceutical bill/slip image.
 Return ONLY valid JSON in this exact structure with double quotes:
 [{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
-                        # Find valid available models for generateContent
-                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        
-                        # Prefer flash/fast models if present
-                        preferred_model = None
-                        for m in available_models:
-                            if 'flash' in m:
-                                preferred_model = m
-                                break
-                        if not preferred_model and available_models:
-                            preferred_model = available_models[0]
-                            
-                        if not preferred_model:
-                            st.error("No valid Gemini models found for this API Key.")
-                        else:
-                            model = genai.GenerativeModel(preferred_model)
+                            model = genai.GenerativeModel(selected_model)
                             response = model.generate_content([prompt, image])
                             raw_text = response.text.strip()
                             
-                            # Clean markdown if present
+                            # Clean markdown formatting if added by model
                             cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                             json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
                             target_str = json_match.group(0) if json_match else cleaned
@@ -132,16 +139,13 @@ Return ONLY valid JSON in this exact structure with double quotes:
                                 try:
                                     parsed_data = ast.literal_eval(target_str)
                                 except Exception:
-                                    try:
-                                        parsed_data = json.loads(target_str.replace("'", '"'))
-                                    except Exception:
-                                        pass
+                                    pass
                             
                             if parsed_data and isinstance(parsed_data, list):
                                 st.session_state['scanned_items'] = parsed_data
-                                st.success(f"✅ AI Scan Successful using model: `{preferred_model}`")
+                                st.success("✅ AI Scan Successful!")
                             else:
-                                st.error("JSON parse nahi ho paya. Raw response:")
+                                st.error("Data parse nahi ho saka. Raw Output:")
                                 st.code(raw_text)
 
                     except Exception as e:
@@ -185,7 +189,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                 
                 save_stock(current_stock)
                 st.balloons()
-                st.success("🎉 Stock Updated!")
+                st.success("🎉 Added to Stock Register!")
                 del st.session_state['scanned_items']
                 st.rerun()
 
@@ -210,7 +214,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                 
                 save_stock(current_stock)
                 st.balloons()
-                st.success("🎉 Sales Recorded!")
+                st.success("🎉 Sales Entry recorded & Stock deducted successfully!")
                 del st.session_state['scanned_items']
                 st.rerun()
 
