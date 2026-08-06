@@ -44,33 +44,29 @@ elif menu == "📸 AI Photo Scanner":
             else:
                 try:
                     genai.configure(api_key=api_key)
-                    
-                    # Google API se available models ki list mangwana
-                    available_models = [
-                        m.name for m in genai.list_models() 
-                        if 'generateContent' in m.supported_generation_methods
-                    ]
-                    
-                    # Auto-select the best available model
-                    selected_model = None
-                    for pref in ['flash', '2.0', '1.5', 'gemini']:
-                        for m in available_models:
-                            if pref in m.lower():
-                                selected_model = m
-                                break
-                        if selected_model:
-                            break
-                    
-                    if not selected_model:
-                        selected_model = available_models[0] if available_models else 'models/gemini-2.0-flash'
-                    
-                    model = genai.GenerativeModel(selected_model)
                     image = Image.open(uploaded_file)
-                    
                     prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
-                    response = model.generate_content([prompt, image])
                     
-                    st.success(f"Analysis Complete! (Used model: {selected_model})")
-                    st.write(response.text)
+                    # 💡 Smart Fallback List: Ek fail hua toh doosra auto-run hoga!
+                    candidate_models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+                    
+                    success = False
+                    last_err = ""
+                    
+                    for model_name in candidate_models:
+                        try:
+                            model = genai.GenerativeModel(model_name)
+                            response = model.generate_content([prompt, image])
+                            st.success(f"✅ Scan Complete! (Used Model: {model_name})")
+                            st.write(response.text)
+                            success = True
+                            break
+                        except Exception as e:
+                            last_err = str(e)
+                            continue
+                    
+                    if not success:
+                        st.error(f"Scan failed on all models. Last Error: {last_err}")
+                        
                 except Exception as e:
                     st.error(f"Error: {e}")
