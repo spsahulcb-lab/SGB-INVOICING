@@ -41,7 +41,7 @@ elif menu == "📸 AI Photo Scanner":
         if st.button("🚀 Process Slip & Update Stock"):
             try:
                 genai.configure(api_key=api_key)
-               model = genai.GenerativeModel('gemini-2.5-flash')
+                model = genai.GenerativeModel('gemini-2.5-flash')
                 image = Image.open(uploaded_file)
                 
                 prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
