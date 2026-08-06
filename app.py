@@ -64,7 +64,7 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Multi-AI Billing & Stock System")
+st.title("💊 LCB Pharma - Smart AI Billing & Stock System")
 
 # API Keys from Streamlit Secrets
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -86,62 +86,38 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (MULTI-MODEL: GEMINI + CHATGPT)
+# 2. AI PHOTO SCANNER (AUTO GEMINI -> CHATGPT FALLBACK)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Bill with Multi-AI Engine")
-    
-    col_ai1, col_ai2 = st.columns([2, 1])
-    with col_ai1:
-        uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
-    with col_ai2:
-        ai_engine = st.selectbox("🤖 Choose AI Engine", [
-            "Google Gemini (Auto)", 
-            "OpenAI ChatGPT (gpt-4o-mini)"
-        ])
+    st.subheader("📸 Scan Handwritten Bill with Smart AI")
+    uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
 
     if uploaded_file:
         st.image(uploaded_file, caption="Uploaded Slip", width=350)
         
-        if st.button(f"🚀 Auto-Scan with {ai_engine}"):
+        if st.button("🚀 Auto-Scan Bill"):
             prompt = """Extract product details from this pharmaceutical bill/slip image.
 Return ONLY valid JSON in this exact structure with double quotes:
 [{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
             raw_text = None
 
-            # --------------------------
-            # OPTION A: GOOGLE GEMINI
-            # --------------------------
-            if "Gemini" in ai_engine:
-                if not gemini_api_key:
-                    st.error("GEMINI_API_KEY nahi mili! Streamlit Secrets check karein.")
-                else:
-                    with st.spinner("🔍 Scanning with Google Gemini..."):
-                        try:
-                            genai.configure(api_key=gemini_api_key)
-                            valid_models = []
-                            for m in genai.list_models():
-                                if 'generateContent' in m.supported_generation_methods:
-                                    valid_models.append(m.name.replace("models/", ""))
-                            
-                            preferred_order = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
-                            selected_model = next((p for p in preferred_order if any(p in v for v in valid_models)), valid_models[0] if valid_models else None)
-                            
-                            if selected_model:
-                                st.info(f"🤖 Gemini Model Active: `{selected_model}`")
-                                image = Image.open(uploaded_file)
-                                image.thumbnail((1024, 1024))
-                                model = genai.GenerativeModel(selected_model)
-                                response = model.generate_content([prompt, image])
-                                raw_text = response.text.strip()
-                        except Exception as e:
-                            st.error(f"Gemini Scan Error: {e}")
+            # 1. First Attempt: Google Gemini
+            if gemini_api_key:
+                with st.spinner("🔍 Trying Google Gemini AI..."):
+                    try:
+                        genai.configure(api_key=gemini_api_key)
+                        model = genai.GenerativeModel("gemini-1.5-flash")
+                        image = Image.open(uploaded_file)
+                        image.thumbnail((1024, 1024))
+                        response = model.generate_content([prompt, image])
+                        raw_text = response.text.strip()
+                        st.info("🤖 Successfully Scanned with Google Gemini!")
+                    except Exception as e:
+                        st.warning("⚠️ Gemini Limit reached or Error occurred. Switching automatically to OpenAI ChatGPT...")
 
-            # --------------------------
-            # OPTION B: OPENAI CHATGPT
-            # --------------------------
-            elif "ChatGPT" in ai_engine:
+            # 2. Second Attempt (Fallback): OpenAI ChatGPT
+            if not raw_text:
                 if not openai_api_key:
                     st.error("OPENAI_API_KEY nahi mili! Streamlit Secrets me 'OPENAI_API_KEY' add karein.")
                 elif not HAS_OPENAI:
@@ -155,28 +131,21 @@ Return ONLY valid JSON in this exact structure with double quotes:
                             
                             response = client.chat.completions.create(
                                 model="gpt-4o-mini",
-                                messages=[
-                                    {
-                                        "role": "user",
-                                        "content": [
-                                            {"type": "text", "text": prompt},
-                                            {
-                                                "type": "image_url",
-                                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                                            }
-                                        ]
-                                    }
-                                ],
+                                messages=[{
+                                    "role": "user",
+                                    "content": [
+                                        {"type": "text", "text": prompt},
+                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
+                                    ]
+                                }],
                                 max_tokens=1000
                             )
                             raw_text = response.choices[0].message.content.strip()
-                            st.info("🤖 ChatGPT Model Active: `gpt-4o-mini`")
+                            st.info("🤖 Successfully Scanned with OpenAI ChatGPT!")
                         except Exception as e:
                             st.error(f"ChatGPT Scan Error: {e}")
 
-            # --------------------------
-            # PARSE JSON OUTPUT
-            # --------------------------
+            # Parse JSON
             if raw_text:
                 cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                 json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
