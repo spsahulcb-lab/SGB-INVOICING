@@ -2,8 +2,6 @@ import streamlit as st
 import pandas as pd
 import os
 import json
-import re
-import ast
 import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
@@ -56,7 +54,7 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Marg/Tally Style Billing & Stock System")
+st.title("💊 LCB Pharma - Speed Optimized Billing & Stock System")
 
 api_key = st.secrets.get("GEMINI_API_KEY", "")
 
@@ -76,68 +74,51 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER
+# 2. AI PHOTO SCANNER (FAST PROCESSING)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
     st.subheader("📸 Scan Handwritten Bill with Gemini AI")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
     
     if uploaded_file:
-        st.image(uploaded_file, caption="Uploaded Slip", width=350)
+        st.image(uploaded_file, caption="Uploaded Slip", width=300)
         
         if st.button("🚀 Process Slip with AI"):
             if not api_key:
                 st.error("API Key nahi mili! Streamlit Secrets check karein.")
             else:
-                try:
-                    genai.configure(api_key=api_key)
-                    image = Image.open(uploaded_file)
-                    
-                    prompt = """Extract details from this pharmaceutical bill/slip.
-Return ONLY valid JSON in this exact structure with double quotes:
-[{"Product Name": "...", "HSN": "3004", "Batch": "B12", "Expiry": "2027-12", "Qty": 10, "Free Qty": 1, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
+                # Progress Spinner for smooth UI
+                with st.spinner("⚡ Fast AI Scanning in Progress... Please wait 2-3 seconds"):
+                    try:
+                        genai.configure(api_key=api_key)
+                        
+                        # Resize Image to max 1024px for lightning-fast payload transfer
+                        image = Image.open(uploaded_file)
+                        image.thumbnail((1024, 1024))
+                        
+                        prompt = """Extract product details from this slip image.
+Return ONLY a valid JSON array of objects with these keys:
+[{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
-                    available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                    
-                    success = False
-                    raw_text = ""
-                    
-                    for model_name in available_models:
-                        try:
-                            model = genai.GenerativeModel(model_name)
-                            response = model.generate_content([prompt, image])
-                            raw_text = response.text
-                            success = True
-                            break
-                        except Exception:
-                            continue
-                    
-                    if success:
-                        cleaned = raw_text.replace("```json", "").replace("```", "").strip()
-                        json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
-                        target_str = json_match.group(0) if json_match else cleaned
+                        # Fast Model Configuration
+                        model = genai.GenerativeModel(
+                            "gemini-1.5-flash",
+                            generation_config={"response_mime_type": "application/json"}
+                        )
                         
-                        parsed_data = None
-                        try:
-                            parsed_data = json.loads(target_str)
-                        except Exception:
-                            try:
-                                parsed_data = ast.literal_eval(target_str)
-                            except Exception:
-                                try:
-                                    parsed_data = json.loads(target_str.replace("'", '"'))
-                                except Exception:
-                                    pass
+                        response = model.generate_content([prompt, image])
+                        raw_text = response.text.strip()
                         
-                        if parsed_data and isinstance(parsed_data, list):
+                        parsed_data = json.loads(raw_text)
+                        
+                        if isinstance(parsed_data, list) and len(parsed_data) > 0:
                             st.session_state['scanned_items'] = parsed_data
-                            st.success("✅ AI Scan Successful!")
+                            st.success("⚡ Fast AI Scan Completed!")
                         else:
-                            st.error("JSON parse nahi ho pa raha hai.")
-                    else:
-                        st.error("Scan failed on all available models.")
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                            st.error("Parchi se koi text read nahi ho paya.")
+
+                    except Exception as e:
+                        st.error(f"Scan Error: {e}")
 
     # Display Scanned Table & Save Options
     if 'scanned_items' in st.session_state:
@@ -155,7 +136,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                     p_hsn = str(item.get('HSN', '3004')).strip()
                     p_batch = str(item.get('Batch', 'N/A')).strip().upper()
                     p_exp = str(item.get('Expiry', 'N/A')).strip()
-                    p_qty = int(item.get('Qty', 0)) + int(item.get('Free Qty', 0)) # Total physical stock received
+                    p_qty = int(item.get('Qty', 0)) + int(item.get('Free Qty', 0))
                     p_mrp = float(item.get('MRP', 0))
                     p_gst = float(item.get('GST %', 12))
                     
@@ -177,7 +158,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                 
                 save_stock(current_stock)
                 st.balloons()
-                st.success("🎉 Added to Stock Register!")
+                st.success("🎉 Stock Updated!")
                 del st.session_state['scanned_items']
                 st.rerun()
 
@@ -202,7 +183,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                 
                 save_stock(current_stock)
                 st.balloons()
-                st.success("🎉 Sales Entry recorded & Stock deducted successfully!")
+                st.success("🎉 Sales Recorded!")
                 del st.session_state['scanned_items']
                 st.rerun()
 
@@ -251,7 +232,7 @@ elif menu == "🛍️ Purchase Entry (Manual)":
                 current_stock = pd.concat([current_stock, new_row], ignore_index=True)
             
             save_stock(current_stock)
-            st.success(f"✅ Added {total_qty} units ({billed_qty} + {free_qty} Free) of {prod_name} to Stock!")
+            st.success(f"✅ Added {total_qty} units of {prod_name} to Stock!")
 
 # ----------------------------------------------------
 # 4. MANUAL SALES BILLING
@@ -293,7 +274,6 @@ elif menu == "🧾 Sales Billing (Sell Items)":
             with c3:
                 discount_given = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
             
-            # Calculation Preview
             gross = sell_qty * item_mrp
             taxable = gross * (1 - discount_given / 100.0)
             gst_val = taxable * (item_gst / 100.0)
@@ -304,7 +284,7 @@ elif menu == "🧾 Sales Billing (Sell Items)":
             if st.button("🏷️ Print & Deduct Stock"):
                 total_deduct = sell_qty + free_given
                 if avail_qty < total_deduct:
-                    st.error("Insufficient Stock for Total Qty (Sale + Free)!")
+                    st.error("Insufficient Stock!")
                 else:
                     mask = (current_stock['Product Name'] == selected_prod) & (current_stock['Batch No'] == selected_batch)
                     current_stock.loc[mask, 'Available Stock'] -= total_deduct
@@ -312,10 +292,9 @@ elif menu == "🧾 Sales Billing (Sell Items)":
                     
                     record_sale(selected_prod, selected_batch, sell_qty, free_given, item_mrp, discount_given, item_gst)
                     st.balloons()
-                    st.success(f"✅ Sale Recorded! Deducted {total_deduct} units from Stock.")
+                    st.success(f"✅ Sale Recorded! Deducted {total_deduct} units.")
                     st.rerun()
 
-    # Sales Register Table
     st.write("---")
     st.subheader("📊 Sales Register & Billing History")
     if os.path.exists(SALES_FILE):
