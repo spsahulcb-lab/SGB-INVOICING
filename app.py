@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import os
 import json
+import re
+import ast
 import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
@@ -74,7 +76,7 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (FAST PROCESSING)
+# 2. AI PHOTO SCANNER (DYNAMIC MODEL AUTO-SELECT)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
     st.subheader("📸 Scan Handwritten Bill with Gemini AI")
@@ -87,35 +89,60 @@ elif menu == "📸 AI Photo Scanner":
             if not api_key:
                 st.error("API Key nahi mili! Streamlit Secrets check karein.")
             else:
-                # Progress Spinner for smooth UI
-                with st.spinner("⚡ Fast AI Scanning in Progress... Please wait 2-3 seconds"):
+                with st.spinner("⚡ Auto-detecting AI Model & Scanning Slip..."):
                     try:
                         genai.configure(api_key=api_key)
                         
-                        # Resize Image to max 1024px for lightning-fast payload transfer
+                        # Compress image to speed up upload
                         image = Image.open(uploaded_file)
                         image.thumbnail((1024, 1024))
                         
-                        prompt = """Extract product details from this slip image.
-Return ONLY a valid JSON array of objects with these keys:
+                        prompt = """Extract product details from this pharmaceutical bill/slip image.
+Return ONLY valid JSON in this exact structure with double quotes:
 [{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
-                        # Fast Model Configuration
-                        model = genai.GenerativeModel(
-                            "gemini-1.5-flash",
-                            generation_config={"response_mime_type": "application/json"}
-                        )
+                        # Find valid available models for generateContent
+                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
                         
-                        response = model.generate_content([prompt, image])
-                        raw_text = response.text.strip()
-                        
-                        parsed_data = json.loads(raw_text)
-                        
-                        if isinstance(parsed_data, list) and len(parsed_data) > 0:
-                            st.session_state['scanned_items'] = parsed_data
-                            st.success("⚡ Fast AI Scan Completed!")
+                        # Prefer flash/fast models if present
+                        preferred_model = None
+                        for m in available_models:
+                            if 'flash' in m:
+                                preferred_model = m
+                                break
+                        if not preferred_model and available_models:
+                            preferred_model = available_models[0]
+                            
+                        if not preferred_model:
+                            st.error("No valid Gemini models found for this API Key.")
                         else:
-                            st.error("Parchi se koi text read nahi ho paya.")
+                            model = genai.GenerativeModel(preferred_model)
+                            response = model.generate_content([prompt, image])
+                            raw_text = response.text.strip()
+                            
+                            # Clean markdown if present
+                            cleaned = raw_text.replace("```json", "").replace("```", "").strip()
+                            json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+                            target_str = json_match.group(0) if json_match else cleaned
+                            
+                            parsed_data = None
+                            try:
+                                parsed_data = json.loads(target_str)
+                            except Exception:
+                                try:
+                                    parsed_data = ast.literal_eval(target_str)
+                                except Exception:
+                                    try:
+                                        parsed_data = json.loads(target_str.replace("'", '"'))
+                                    except Exception:
+                                        pass
+                            
+                            if parsed_data and isinstance(parsed_data, list):
+                                st.session_state['scanned_items'] = parsed_data
+                                st.success(f"✅ AI Scan Successful using model: `{preferred_model}`")
+                            else:
+                                st.error("JSON parse nahi ho paya. Raw response:")
+                                st.code(raw_text)
 
                     except Exception as e:
                         st.error(f"Scan Error: {e}")
