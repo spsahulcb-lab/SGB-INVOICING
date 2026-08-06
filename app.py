@@ -23,11 +23,7 @@ def get_stock():
 st.title("💊 LCB Pharma - Sales, Purchase & Stock App")
 
 # Secrets se automatic API key lene ka code
-api_key = ""
-if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-else:
-    api_key = st.sidebar.text_input("🔑 Enter Gemini API Key", type="password")
+api_key = st.secrets.get("GEMINI_API_KEY", "")
 
 menu = st.sidebar.radio("Navigation Menu", ["📦 Stock Inventory", "📸 AI Photo Scanner", "🛍️ Purchase Entry", "🧾 Sales Billing"])
 
@@ -44,7 +40,7 @@ elif menu == "📸 AI Photo Scanner":
         
         if st.button("🚀 Process Slip & Update Stock"):
             if not api_key:
-                st.error("API Key nahi mili! Sidebar me key dalein ya Streamlit Secrets check karein.")
+                st.error("Secrets me API Key nahi mili! Streamlit Settings check karein.")
             else:
                 try:
                     genai.configure(api_key=api_key)
