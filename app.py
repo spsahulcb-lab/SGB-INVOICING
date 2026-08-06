@@ -9,7 +9,7 @@ import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
 
-# Safely import Groq
+# Try importing Groq safely
 try:
     from groq import Groq
     HAS_GROQ = True
@@ -64,7 +64,7 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - AI Billing & Stock System")
+st.title("💊 LCB Pharma - Smart AI Billing & Stock System")
 
 # API Keys from Streamlit Secrets
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
@@ -86,7 +86,7 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (GEMINI -> GROQ FREE FALLBACK)
+# 2. AI PHOTO SCANNER (MULTI-MODEL BACKUP ENGINE)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
     st.subheader("📸 Scan Handwritten Bill with Free AI")
@@ -102,35 +102,43 @@ Return ONLY valid JSON in this exact structure with double quotes:
 
             raw_text = None
 
-            # 1. Try Gemini AI First
+            # -----------------------------------------
+            # ATTEMPT 1: GOOGLE GEMINI (MODELS TRY)
+            # -----------------------------------------
             if gemini_api_key:
                 with st.spinner("🔍 Trying Google Gemini AI..."):
-                    try:
-                        genai.configure(api_key=gemini_api_key)
-                        model = genai.GenerativeModel("gemini-1.5-flash")
-                        image = Image.open(uploaded_file)
-                        image.thumbnail((1024, 1024))
-                        response = model.generate_content([prompt, image])
-                        raw_text = response.text.strip()
-                        st.info("🤖 Scanned with Google Gemini!")
-                    except Exception as e:
-                        st.warning("⚠️ Gemini Limit reached. Switching automatically to Groq Free AI...")
-
-            # 2. Fallback to Groq (Llama 3.2 Vision) if Gemini fails
-            if not raw_text:
-                if not groq_api_key:
-                    st.error("GROQ_API_KEY नहीं मिली! Streamlit Secrets में GROQ_API_KEY जोड़ें।")
-                elif not HAS_GROQ:
-                    st.error("Groq Library missing! 'requirements.txt' में 'groq' जोड़ें।")
-                else:
-                    with st.spinner("🧠 Scanning with Groq Free AI (Llama 3.2 Vision)..."):
+                    genai.configure(api_key=gemini_api_key)
+                    # Try stable models sequentially
+                    for gem_model in ["gemini-1.5-flash", "gemini-1.5-pro"]:
                         try:
-                            client = Groq(api_key=groq_api_key)
-                            bytes_data = uploaded_file.getvalue()
-                            base64_image = base64.b64encode(bytes_data).decode('utf-8')
-                            
+                            model = genai.GenerativeModel(gem_model)
+                            image = Image.open(uploaded_file)
+                            image.thumbnail((1024, 1024))
+                            response = model.generate_content([prompt, image])
+                            raw_text = response.text.strip()
+                            if raw_text:
+                                st.info(f"🤖 Successfully Scanned with Gemini (`{gem_model}`)!")
+                                break
+                        except Exception:
+                            continue
+
+            # -----------------------------------------
+            # ATTEMPT 2: GROQ FREE AI (UPDATED MODELS)
+            # -----------------------------------------
+            if not raw_text and groq_api_key and HAS_GROQ:
+                st.warning("⚠️ Gemini Limit reached. Switching automatically to Groq Free AI...")
+                with st.spinner("🧠 Scanning with Groq Vision AI..."):
+                    client = Groq(api_key=groq_api_key)
+                    bytes_data = uploaded_file.getvalue()
+                    base64_image = base64.b64encode(bytes_data).decode('utf-8')
+                    
+                    # Try Groq active vision models
+                    groq_models = ["llama-3.2-11b-vision-instruct", "llama-3.2-90b-vision-instruct"]
+                    
+                    for g_model in groq_models:
+                        try:
                             response = client.chat.completions.create(
-                                model="llama-3.2-11b-vision-preview",
+                                model=g_model,
                                 messages=[{
                                     "role": "user",
                                     "content": [
@@ -141,11 +149,19 @@ Return ONLY valid JSON in this exact structure with double quotes:
                                 max_tokens=1000
                             )
                             raw_text = response.choices[0].message.content.strip()
-                            st.info("🤖 Scanned with Groq Free AI!")
+                            if raw_text:
+                                st.info(f"🤖 Successfully Scanned with Groq (`{g_model}`)!")
+                                break
                         except Exception as e:
-                            st.error(f"Groq Scan Error: {e}")
+                            last_err = e
+                            continue
+                    
+                    if not raw_text:
+                        st.error(f"Groq Scan Error: {last_err}")
 
-            # Parse JSON
+            # -----------------------------------------
+            # PARSE JSON OUTPUT
+            # -----------------------------------------
             if raw_text:
                 cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                 json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
@@ -164,7 +180,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                     st.session_state['scanned_items'] = parsed_data
                     st.success("✅ AI Scan Successful!")
                 else:
-                    st.error("Data parse नहीं हो सका। Raw Output:")
+                    st.error("Data parse nahi ho saka. Raw Output:")
                     st.code(raw_text)
 
     # Display Scanned Table & Save Options
