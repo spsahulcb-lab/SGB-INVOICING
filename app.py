@@ -22,8 +22,12 @@ def get_stock():
 
 st.title("💊 LCB Pharma - Sales, Purchase & Stock App")
 
-# API KEY INPUT IN SIDEBAR
-api_key = st.sidebar.text_input("🔑 Enter Gemini API Key", type="password")
+# Secrets se automatic API key lene ka code
+api_key = ""
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+else:
+    api_key = st.sidebar.text_input("🔑 Enter Gemini API Key", type="password")
 
 menu = st.sidebar.radio("Navigation Menu", ["📦 Stock Inventory", "📸 AI Photo Scanner", "🛍️ Purchase Entry", "🧾 Sales Billing"])
 
@@ -35,21 +39,22 @@ elif menu == "📸 AI Photo Scanner":
     st.subheader("Scan Handwritten Bill with Gemini AI")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
     
-    if uploaded_file and api_key:
+    if uploaded_file:
         st.image(uploaded_file, caption="Uploaded Slip", width=350)
         
         if st.button("🚀 Process Slip & Update Stock"):
-            try:
-                genai.configure(api_key=api_key)
-                model = genai.GenerativeModel('gemini-2.5-flash')
-                image = Image.open(uploaded_file)
-                
-                prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
-                response = model.generate_content([prompt, image])
-                
-                st.success("Analysis Complete!")
-                st.write(response.text)
-            except Exception as e:
-                st.error(f"Error: {e}")
-    elif uploaded_file and not api_key:
-        st.warning("Kripya left sidebar me apni Gemini API Key dalein!")
+            if not api_key:
+                st.error("API Key nahi mili! Sidebar me key dalein ya Streamlit Secrets check karein.")
+            else:
+                try:
+                    genai.configure(api_key=api_key)
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    image = Image.open(uploaded_file)
+                    
+                    prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
+                    response = model.generate_content([prompt, image])
+                    
+                    st.success("Analysis Complete!")
+                    st.write(response.text)
+                except Exception as e:
+                    st.error(f"Error: {e}")
