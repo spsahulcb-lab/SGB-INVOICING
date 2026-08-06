@@ -40,11 +40,12 @@ elif menu == "📸 AI Photo Scanner":
         
         if st.button("🚀 Process Slip & Update Stock"):
             if not api_key:
-                st.error("Secrets me API Key nahi mili! Streamlit Settings check karein.")
+                st.error("API Key nahi mili! Streamlit Secrets me GEMINI_API_KEY save karein.")
             else:
                 try:
                     genai.configure(api_key=api_key)
-                    model = genai.GenerativeModel('gemini-2.0-flash')
+                    # 100% Free Tier Supported Model
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                     image = Image.open(uploaded_file)
                     
                     prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
