@@ -45,7 +45,7 @@ elif menu == "📸 AI Photo Scanner":
                 try:
                     genai.configure(api_key=api_key)
                     # 100% Free Tier Supported Model
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-pro-vision')
                     image = Image.open(uploaded_file)
                     
                     prompt = "Extract product names, quantities, and MRPs from this slip as JSON format: [{'Product Name': '...', 'Qty': 0, 'MRP': 0}]"
