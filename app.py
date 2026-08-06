@@ -9,12 +9,12 @@ import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
 
-# Try importing OpenAI safely
+# Safely import Groq
 try:
-    from openai import OpenAI
-    HAS_OPENAI = True
+    from groq import Groq
+    HAS_GROQ = True
 except ImportError:
-    HAS_OPENAI = False
+    HAS_GROQ = False
 
 st.set_page_config(page_title="Pharma Stock & Billing App", layout="wide")
 
@@ -64,11 +64,11 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Smart AI Billing & Stock System")
+st.title("💊 LCB Pharma - AI Billing & Stock System")
 
 # API Keys from Streamlit Secrets
 gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
-openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
+groq_api_key = st.secrets.get("GROQ_API_KEY", "")
 
 menu = st.sidebar.radio("Navigation Menu", [
     "📦 Stock Inventory", 
@@ -86,10 +86,10 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (AUTO GEMINI -> CHATGPT FALLBACK)
+# 2. AI PHOTO SCANNER (GEMINI -> GROQ FREE FALLBACK)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Bill with Smart AI")
+    st.subheader("📸 Scan Handwritten Bill with Free AI")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
 
     if uploaded_file:
@@ -102,7 +102,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
 
             raw_text = None
 
-            # 1. First Attempt: Google Gemini
+            # 1. Try Gemini AI First
             if gemini_api_key:
                 with st.spinner("🔍 Trying Google Gemini AI..."):
                     try:
@@ -112,25 +112,25 @@ Return ONLY valid JSON in this exact structure with double quotes:
                         image.thumbnail((1024, 1024))
                         response = model.generate_content([prompt, image])
                         raw_text = response.text.strip()
-                        st.info("🤖 Successfully Scanned with Google Gemini!")
+                        st.info("🤖 Scanned with Google Gemini!")
                     except Exception as e:
-                        st.warning("⚠️ Gemini Limit reached or Error occurred. Switching automatically to OpenAI ChatGPT...")
+                        st.warning("⚠️ Gemini Limit reached. Switching automatically to Groq Free AI...")
 
-            # 2. Second Attempt (Fallback): OpenAI ChatGPT
+            # 2. Fallback to Groq (Llama 3.2 Vision) if Gemini fails
             if not raw_text:
-                if not openai_api_key:
-                    st.error("OPENAI_API_KEY nahi mili! Streamlit Secrets me 'OPENAI_API_KEY' add karein.")
-                elif not HAS_OPENAI:
-                    st.error("OpenAI library missing! Add 'openai' to requirements.txt")
+                if not groq_api_key:
+                    st.error("GROQ_API_KEY नहीं मिली! Streamlit Secrets में GROQ_API_KEY जोड़ें।")
+                elif not HAS_GROQ:
+                    st.error("Groq Library missing! 'requirements.txt' में 'groq' जोड़ें।")
                 else:
-                    with st.spinner("🧠 Scanning with OpenAI ChatGPT (gpt-4o-mini)..."):
+                    with st.spinner("🧠 Scanning with Groq Free AI (Llama 3.2 Vision)..."):
                         try:
-                            client = OpenAI(api_key=openai_api_key)
+                            client = Groq(api_key=groq_api_key)
                             bytes_data = uploaded_file.getvalue()
                             base64_image = base64.b64encode(bytes_data).decode('utf-8')
                             
                             response = client.chat.completions.create(
-                                model="gpt-4o-mini",
+                                model="llama-3.2-11b-vision-preview",
                                 messages=[{
                                     "role": "user",
                                     "content": [
@@ -141,9 +141,9 @@ Return ONLY valid JSON in this exact structure with double quotes:
                                 max_tokens=1000
                             )
                             raw_text = response.choices[0].message.content.strip()
-                            st.info("🤖 Successfully Scanned with OpenAI ChatGPT!")
+                            st.info("🤖 Scanned with Groq Free AI!")
                         except Exception as e:
-                            st.error(f"ChatGPT Scan Error: {e}")
+                            st.error(f"Groq Scan Error: {e}")
 
             # Parse JSON
             if raw_text:
@@ -164,7 +164,7 @@ Return ONLY valid JSON in this exact structure with double quotes:
                     st.session_state['scanned_items'] = parsed_data
                     st.success("✅ AI Scan Successful!")
                 else:
-                    st.error("Data parse nahi ho saka. Raw Output:")
+                    st.error("Data parse नहीं हो सका। Raw Output:")
                     st.code(raw_text)
 
     # Display Scanned Table & Save Options
