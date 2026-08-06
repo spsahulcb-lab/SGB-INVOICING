@@ -4,9 +4,17 @@ import os
 import json
 import re
 import ast
+import base64
 import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
+
+# Try importing OpenAI safely
+try:
+    from openai import OpenAI
+    HAS_OPENAI = True
+except ImportError:
+    HAS_OPENAI = False
 
 st.set_page_config(page_title="Pharma Stock & Billing App", layout="wide")
 
@@ -56,9 +64,11 @@ def record_sale(product_name, batch, qty, free_qty, mrp, disc_pct, gst_pct):
         sales_df = new_sale
     sales_df.to_csv(SALES_FILE, index=False)
 
-st.title("💊 LCB Pharma - Auto Dynamic Model Detection System")
+st.title("💊 LCB Pharma - Multi-AI Billing & Stock System")
 
-api_key = st.secrets.get("GEMINI_API_KEY", "")
+# API Keys from Streamlit Secrets
+gemini_api_key = st.secrets.get("GEMINI_API_KEY", "")
+openai_api_key = st.secrets.get("OPENAI_API_KEY", "")
 
 menu = st.sidebar.radio("Navigation Menu", [
     "📦 Stock Inventory", 
@@ -76,81 +86,117 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (DYNAMIC GOOGLE MODEL DISCOVERY)
+# 2. AI PHOTO SCANNER (MULTI-MODEL: GEMINI + CHATGPT)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Bill with Auto Google AI")
-    uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
+    st.subheader("📸 Scan Handwritten Bill with Multi-AI Engine")
     
+    col_ai1, col_ai2 = st.columns([2, 1])
+    with col_ai1:
+        uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
+    with col_ai2:
+        ai_engine = st.selectbox("🤖 Choose AI Engine", [
+            "Google Gemini (Auto)", 
+            "OpenAI ChatGPT (gpt-4o-mini)"
+        ])
+
     if uploaded_file:
         st.image(uploaded_file, caption="Uploaded Slip", width=350)
         
-        if st.button("🚀 Auto-Scan Slip with Google AI"):
-            if not api_key:
-                st.error("API Key nahi mili! Streamlit Secrets check karein.")
-            else:
-                with st.spinner("🔍 Google API se active models ki list auto-detect ki ja rahi hai..."):
-                    try:
-                        genai.configure(api_key=api_key)
-                        
-                        # Fetch active models directly from Google API
-                        valid_models = []
-                        for m in genai.list_models():
-                            if 'generateContent' in m.supported_generation_methods:
-                                model_id = m.name.replace("models/", "")
-                                valid_models.append(model_id)
-                        
-                        # Preferred stable model priority list
-                        preferred_order = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"]
-                        
-                        selected_model = None
-                        # Check preferred models against valid models returned by Google API
-                        for pref in preferred_order:
-                            if any(pref in v for v in valid_models):
-                                selected_model = pref
-                                break
-                        
-                        if not selected_model and valid_models:
-                            selected_model = valid_models[0]
-                            
-                        if not selected_model:
-                            st.error("Google API se koi valid model nahi mila. Kripya API Key check karein.")
-                        else:
-                            st.info(f"🤖 Google API Verified Model Selected: `{selected_model}`")
-                            
-                            image = Image.open(uploaded_file)
-                            image.thumbnail((1024, 1024))
-                            
-                            prompt = """Extract product details from this pharmaceutical bill/slip image.
+        if st.button(f"🚀 Auto-Scan with {ai_engine}"):
+            prompt = """Extract product details from this pharmaceutical bill/slip image.
 Return ONLY valid JSON in this exact structure with double quotes:
 [{"Product Name": "ITEM", "HSN": "3004", "Batch": "B01", "Expiry": "2027-12", "Qty": 10, "Free Qty": 0, "MRP": 100.0, "Discount %": 0, "GST %": 12}]"""
 
-                            model = genai.GenerativeModel(selected_model)
-                            response = model.generate_content([prompt, image])
-                            raw_text = response.text.strip()
-                            
-                            cleaned = raw_text.replace("```json", "").replace("```", "").strip()
-                            json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
-                            target_str = json_match.group(0) if json_match else cleaned
-                            
-                            parsed_data = None
-                            try:
-                                parsed_data = json.loads(target_str)
-                            except Exception:
-                                try:
-                                    parsed_data = ast.literal_eval(target_str)
-                                except Exception:
-                                    pass
-                            
-                            if parsed_data and isinstance(parsed_data, list):
-                                st.session_state['scanned_items'] = parsed_data
-                                st.success("✅ AI Scan Successful!")
-                            else:
-                                st.error("Data parse nahi ho saka. Raw Output:")
-                                st.code(raw_text)
+            raw_text = None
 
-                    except Exception as e:
-                        st.error(f"Scan Error: {e}")
+            # --------------------------
+            # OPTION A: GOOGLE GEMINI
+            # --------------------------
+            if "Gemini" in ai_engine:
+                if not gemini_api_key:
+                    st.error("GEMINI_API_KEY nahi mili! Streamlit Secrets check karein.")
+                else:
+                    with st.spinner("🔍 Scanning with Google Gemini..."):
+                        try:
+                            genai.configure(api_key=gemini_api_key)
+                            valid_models = []
+                            for m in genai.list_models():
+                                if 'generateContent' in m.supported_generation_methods:
+                                    valid_models.append(m.name.replace("models/", ""))
+                            
+                            preferred_order = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+                            selected_model = next((p for p in preferred_order if any(p in v for v in valid_models)), valid_models[0] if valid_models else None)
+                            
+                            if selected_model:
+                                st.info(f"🤖 Gemini Model Active: `{selected_model}`")
+                                image = Image.open(uploaded_file)
+                                image.thumbnail((1024, 1024))
+                                model = genai.GenerativeModel(selected_model)
+                                response = model.generate_content([prompt, image])
+                                raw_text = response.text.strip()
+                        except Exception as e:
+                            st.error(f"Gemini Scan Error: {e}")
+
+            # --------------------------
+            # OPTION B: OPENAI CHATGPT
+            # --------------------------
+            elif "ChatGPT" in ai_engine:
+                if not openai_api_key:
+                    st.error("OPENAI_API_KEY nahi mili! Streamlit Secrets me 'OPENAI_API_KEY' add karein.")
+                elif not HAS_OPENAI:
+                    st.error("OpenAI library missing! Add 'openai' to requirements.txt")
+                else:
+                    with st.spinner("🧠 Scanning with OpenAI ChatGPT (gpt-4o-mini)..."):
+                        try:
+                            client = OpenAI(api_key=openai_api_key)
+                            bytes_data = uploaded_file.getvalue()
+                            base64_image = base64.b64encode(bytes_data).decode('utf-8')
+                            
+                            response = client.chat.completions.create(
+                                model="gpt-4o-mini",
+                                messages=[
+                                    {
+                                        "role": "user",
+                                        "content": [
+                                            {"type": "text", "text": prompt},
+                                            {
+                                                "type": "image_url",
+                                                "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                                            }
+                                        ]
+                                    }
+                                ],
+                                max_tokens=1000
+                            )
+                            raw_text = response.choices[0].message.content.strip()
+                            st.info("🤖 ChatGPT Model Active: `gpt-4o-mini`")
+                        except Exception as e:
+                            st.error(f"ChatGPT Scan Error: {e}")
+
+            # --------------------------
+            # PARSE JSON OUTPUT
+            # --------------------------
+            if raw_text:
+                cleaned = raw_text.replace("```json", "").replace("```", "").strip()
+                json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
+                target_str = json_match.group(0) if json_match else cleaned
+                
+                parsed_data = None
+                try:
+                    parsed_data = json.loads(target_str)
+                except Exception:
+                    try:
+                        parsed_data = ast.literal_eval(target_str)
+                    except Exception:
+                        pass
+                
+                if parsed_data and isinstance(parsed_data, list):
+                    st.session_state['scanned_items'] = parsed_data
+                    st.success("✅ AI Scan Successful!")
+                else:
+                    st.error("Data parse nahi ho saka. Raw Output:")
+                    st.code(raw_text)
 
     # Display Scanned Table & Save Options
     if 'scanned_items' in st.session_state:
