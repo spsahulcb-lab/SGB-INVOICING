@@ -4,7 +4,6 @@ import os
 import json
 import re
 import ast
-import io
 import google.generativeai as genai
 from PIL import Image
 from datetime import datetime
@@ -78,10 +77,10 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (AUTO DYNAMIC MODEL SELECTION)
+# 2. AI PHOTO SCANNER (NO EXCEL DEPENDENCY)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Slip with Auto-Model Selection")
+    st.subheader("📸 Scan Handwritten Slip with Smart Master Matching")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
 
     if uploaded_file:
@@ -109,13 +108,10 @@ INSTRUCTIONS:
                     raw_text = None
                     used_model_name = ""
                     
-                    with st.spinner("🔍 Fetching active models from Google & Scanning..."):
+                    with st.spinner("🔍 Fetching active models & scanning slip..."):
                         genai.configure(api_key=gemini_api_key)
                         
-                        # 1. Get all available active models from Google dynamically
                         all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        
-                        # Sort to prioritize 'flash' and 'gemini' vision models first
                         flash_models = [m for m in all_models if 'flash' in m.lower()]
                         other_models = [m for m in all_models if 'flash' not in m.lower() and 'gemini' in m.lower()]
                         models_to_try = list(dict.fromkeys(flash_models + other_models + all_models))
@@ -123,7 +119,6 @@ INSTRUCTIONS:
                         image = Image.open(uploaded_file)
                         image.thumbnail((1024, 1024))
                         
-                        # 2. Try models automatically until one succeeds
                         last_error = ""
                         for m_name in models_to_try:
                             try:
@@ -138,7 +133,7 @@ INSTRUCTIONS:
                                 continue
 
                     if raw_text:
-                        st.info(f"🤖 Scanned using dynamic model: `{used_model_name}`")
+                        st.info(f"🤖 Scanned using model: `{used_model_name}`")
                         cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                         json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
                         target_str = json_match.group(0) if json_match else cleaned
@@ -160,29 +155,18 @@ INSTRUCTIONS:
                             st.error("Data parse nahi ho saka. Raw output:")
                             st.code(raw_text)
                     else:
-                        st.error(f"❌ Koi bhi Active Model scan nahi kar paya. Last Error: {last_error}")
+                        st.error(f"❌ Scan Error: {last_error}")
 
                 except Exception as err:
                     st.error(f"❌ Connection Error: {err}")
 
-    # Display Scanned Table, Download Options & Save Buttons
+    # Display Scanned Table & Stock Action Buttons
     if 'scanned_items' in st.session_state:
-        st.write("### 🔍 Scanned & Matched Bill Items")
+        st.write("### 🔍 Scanned & Matched Items")
         scanned_df = pd.DataFrame(st.session_state['scanned_items'])
         
+        # Interactive table to verify/edit items directly on screen
         edited_df = st.data_editor(scanned_df, use_container_width=True, num_rows="dynamic")
-
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            edited_df.to_excel(writer, index=False, sheet_name='Scanned_Bill')
-        excel_data = buffer.getvalue()
-
-        st.download_button(
-            label="📊 Download Bill as Excel (.xlsx)",
-            data=excel_data,
-            file_name=f"Scanned_Bill_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
 
         st.write("---")
         col1, col2 = st.columns(2)
