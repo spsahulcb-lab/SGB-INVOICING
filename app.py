@@ -78,10 +78,10 @@ if menu == "📦 Stock Inventory":
     st.dataframe(stock_df, use_container_width=True)
 
 # ----------------------------------------------------
-# 2. AI PHOTO SCANNER (WITH MASTER LIST MATCHING)
+# 2. AI PHOTO SCANNER (AUTO DYNAMIC MODEL SELECTION)
 # ----------------------------------------------------
 elif menu == "📸 AI Photo Scanner":
-    st.subheader("📸 Scan Handwritten Slip with Smart Master Matching")
+    st.subheader("📸 Scan Handwritten Slip with Auto-Model Selection")
     uploaded_file = st.file_uploader("Upload Handwritten Slip Photo", type=['jpg', 'jpeg', 'png'])
 
     if uploaded_file:
@@ -107,21 +107,38 @@ INSTRUCTIONS:
 ]"""
 
                     raw_text = None
-                    with st.spinner("🔍 AI Reading slip... Please wait..."):
+                    used_model_name = ""
+                    
+                    with st.spinner("🔍 Fetching active models from Google & Scanning..."):
                         genai.configure(api_key=gemini_api_key)
+                        
+                        # 1. Get all available active models from Google dynamically
+                        all_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                        
+                        # Sort to prioritize 'flash' and 'gemini' vision models first
+                        flash_models = [m for m in all_models if 'flash' in m.lower()]
+                        other_models = [m for m in all_models if 'flash' not in m.lower() and 'gemini' in m.lower()]
+                        models_to_try = list(dict.fromkeys(flash_models + other_models + all_models))
+                        
                         image = Image.open(uploaded_file)
                         image.thumbnail((1024, 1024))
                         
-                        try:
-                            model = genai.GenerativeModel("gemini-2.0-flash")
-                            response = model.generate_content([prompt, image])
-                            raw_text = response.text.strip()
-                        except Exception:
-                            model = genai.GenerativeModel("gemini-1.5-flash")
-                            response = model.generate_content([prompt, image])
-                            raw_text = response.text.strip()
+                        # 2. Try models automatically until one succeeds
+                        last_error = ""
+                        for m_name in models_to_try:
+                            try:
+                                model = genai.GenerativeModel(m_name)
+                                response = model.generate_content([prompt, image])
+                                raw_text = response.text.strip()
+                                if raw_text:
+                                    used_model_name = m_name
+                                    break
+                            except Exception as e:
+                                last_error = str(e)
+                                continue
 
                     if raw_text:
+                        st.info(f"🤖 Scanned using dynamic model: `{used_model_name}`")
                         cleaned = raw_text.replace("```json", "").replace("```", "").strip()
                         json_match = re.search(r'\[.*\]', cleaned, re.DOTALL)
                         target_str = json_match.group(0) if json_match else cleaned
@@ -142,9 +159,11 @@ INSTRUCTIONS:
                         else:
                             st.error("Data parse nahi ho saka. Raw output:")
                             st.code(raw_text)
+                    else:
+                        st.error(f"❌ Koi bhi Active Model scan nahi kar paya. Last Error: {last_error}")
 
                 except Exception as err:
-                    st.error(f"❌ Scan Error: {err}")
+                    st.error(f"❌ Connection Error: {err}")
 
     # Display Scanned Table, Download Options & Save Buttons
     if 'scanned_items' in st.session_state:
