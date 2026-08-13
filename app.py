@@ -20,6 +20,7 @@ st.title("💊 Pharma ERP - Marg & Tally Style Smart Invoicing")
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
+
 # Initialize Session Dataframes with Marg/Tally Pharma Columns
 def get_empty_invoice_df():
     return pd.DataFrame(
@@ -35,6 +36,7 @@ def get_empty_invoice_df():
             }
         ]
     )
+
 
 if "purchase_data" not in st.session_state:
     st.session_state["purchase_data"] = get_empty_invoice_df()
@@ -90,7 +92,7 @@ if "sales_history" not in st.session_state:
 
 
 # ==========================================
-# 2. AI SCANNER ENGINE
+# 2. DYNAMIC AI SCANNER & COMPRESSION ENGINE
 # ==========================================
 def compress_image(uploaded_file, max_dimension=1280, quality=75):
     img = Image.open(uploaded_file)
@@ -102,13 +104,38 @@ def compress_image(uploaded_file, max_dimension=1280, quality=75):
     return buffer.getvalue()
 
 
+def get_active_vision_models():
+    """Dynamically fetch all available models from Gemini API."""
+    try:
+        active_models = []
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                model_name = m.name.replace("models/", "")
+                active_models.append(model_name)
+
+        flash_models = [
+            m
+            for m in active_models
+            if "flash" in m.lower() and "experimental" not in m.lower()
+        ]
+        other_models = [
+            m
+            for m in active_models
+            if "flash" not in m.lower() and "experimental" not in m.lower()
+        ]
+        combined = flash_models + other_models
+        return combined if combined else ["gemini-1.5-flash", "gemini-2.5-flash"]
+    except Exception:
+        return ["gemini-1.5-flash", "gemini-2.5-flash"]
+
+
 def scan_slip_with_party_ai(uploaded_file, slip_type="sales"):
     compressed_bytes = compress_image(uploaded_file)
 
     prompt = f"""
     Extract billing details from this {slip_type} invoice/slip image.
     Include:
-    1. Party Name (Store/Customer/Supplier name at the top).
+    1. Party Name (Store/Customer/Supplier name at the top. If not found, return "Unknown Party").
     2. Items list with columns:
        - "Product Name"
        - "MRP" (float)
@@ -126,10 +153,25 @@ def scan_slip_with_party_ai(uploaded_file, slip_type="sales"):
       ]
     }}
     """
-    model = genai.GenerativeModel("gemini-1.5-flash")
-    response = model.generate_content(
-        [prompt, {"mime_type": "image/jpeg", "data": compressed_bytes}]
-    )
+    available_models = get_active_vision_models()
+    response = None
+    last_error = None
+
+    for model_name in available_models:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                [prompt, {"mime_type": "image/jpeg", "data": compressed_bytes}]
+            )
+            if response and response.text:
+                break
+        except Exception as e:
+            last_error = e
+            continue
+
+    if not response or not response.text:
+        raise Exception(f"स्कैन पूरा नहीं हो सका। Error: {last_error}")
+
     clean_json = (
         response.text.replace("```json", "").replace("```", "").strip()
     )
@@ -166,8 +208,8 @@ def calculate_pharma_bill(df):
 # ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
-        "🧾 1. Sales Invoice (Marg/Tally Style)",
-        "📦 2. Purchase Invoice (Inward)",
+        "📦 1. Purchase Invoice (Inward)",
+        "🧾 2. Sales Invoice (Marg/Tally Style)",
         "📒 3. Party Ledger Statement",
         "📊 4. Live Stock Inventory",
         "⚙️ 5. Party Master & Voucher Entry",
@@ -176,9 +218,114 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 
 
 # ------------------------------------------
-# TAB 1: SALES INVOICE (MARG / TALLY STYLE)
+# TAB 1: PURCHASE INVOICE (INWARD)
 # ------------------------------------------
 with tab1:
+    st.header("📦 Marg / Tally Style Purchase Invoice")
+
+    col_p1, col_p2 = st.columns([1, 1])
+
+    with col_p1:
+        st.subheader("📷 Auto-Scan Purchase Bill")
+        p_file = st.file_uploader(
+            "Upload Purchase Slip Image",
+            type=["jpg", "png", "jpeg"],
+            key="p_file",
+        )
+        if p_file:
+            st.image(p_file, caption="Uploaded Slip", width=180)
+            if st.button("🚀 Auto-Scan Purchase Bill", key="btn_p_scan"):
+                with st.spinner("⚡ AI स्कैनिंग चल रही है..."):
+                    try:
+                        res = scan_slip_with_party_ai(p_file, "purchase")
+                        st.session_state["purchase_data"] = pd.DataFrame(
+                            res.get("Items", [])
+                        )
+                        st.session_state["scanned_p_party"] = res.get(
+                            "Party Name", ""
+                        )
+                        st.success("✅ स्कैन पूरा हो गया!")
+                    except Exception as e:
+                        st.error(f"स्कैन त्रुटि: {str(e)}")
+
+    with col_p2:
+        st.subheader("✍️ Supplier Details (Editable)")
+        p_suppliers = st.session_state["party_master"][
+            st.session_state["party_master"]["Type"] == "Supplier"
+        ]["Party Name"].tolist()
+
+        default_s = (
+            st.session_state["scanned_p_party"]
+            if st.session_state["scanned_p_party"]
+            else (
+                p_suppliers[0]
+                if p_suppliers
+                else "MEDICARE PHARMA DISTRIBUTORS"
+            )
+        )
+
+        final_p_party = st.text_input(
+            "✏️ Party / Supplier Name", value=default_s, key="txt_p_party"
+        )
+        p_inv_no = st.text_input(
+            "✏️ Bill No.", "PUR-2026-001", key="txt_p_inv"
+        )
+
+    st.markdown("---")
+    st.subheader("📝 Products, Deals & Rate Entries (Direct Editing Table)")
+
+    edited_p_df = st.data_editor(
+        st.session_state["purchase_data"],
+        key="p_table_editor",
+        num_rows="dynamic",
+        use_container_width=True,
+    )
+
+    calc_p_df = calculate_pharma_bill(edited_p_df)
+
+    p_grand_total = calc_p_df["Net Line Amount"].sum()
+    st.info(f"💰 Total Purchase Amount Payable: ₹{p_grand_total:,.2f}")
+
+    if st.button("📥 Save Purchase Invoice & Post to Ledger", key="btn_save_pur_final"):
+        if not final_p_party.strip():
+            st.error("⚠️ कृपया सप्लायर का नाम दर्ज करें!")
+        else:
+            valid_p = calc_p_df[
+                calc_p_df["Product Name"].astype(str).str.strip() != ""
+            ].copy()
+            valid_p["Party Name"] = final_p_party
+
+            st.session_state["purchase_history"] = pd.concat(
+                [st.session_state["purchase_history"], valid_p],
+                ignore_index=True,
+            )
+
+            new_ledger = {
+                "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                "Party Name": final_p_party,
+                "Voucher Type": "Purchase Invoice",
+                "Ref No": p_inv_no,
+                "Debit (Dr)": 0.0,
+                "Credit (Cr)": float(p_grand_total),
+                "Remarks": f"Pharma Purchase Invoice #{p_inv_no}",
+            }
+            st.session_state["ledger_transactions"] = pd.concat(
+                [
+                    st.session_state["ledger_transactions"],
+                    pd.DataFrame([new_ledger]),
+                ],
+                ignore_index=True,
+            )
+
+            st.session_state["purchase_data"] = get_empty_invoice_df()
+            st.session_state["scanned_p_party"] = ""
+            st.success("🎉 परचेज बिल सेव हो गया और सप्लायर लेजर में Credit हो गया!")
+
+
+# ------------------------------------------
+# TAB 2: SALES INVOICE (MARG / TALLY STYLE)
+# ------------------------------------------
+with tab2:
     st.header("🧾 Marg / Tally Style Pharma Sales Invoice")
 
     col_s1, col_s2 = st.columns([1, 1])
@@ -232,7 +379,6 @@ with tab1:
         "📝 Product-wise Rates, Deals & Discounts Table (Direct Editing)"
     )
 
-    # Dynamic Editor for Pharma Billing Table
     edited_s_df = st.data_editor(
         st.session_state["sales_data"],
         key="s_table_editor",
@@ -240,10 +386,8 @@ with tab1:
         use_container_width=True,
     )
 
-    # Process Dynamic Math
     calc_s_df = calculate_pharma_bill(edited_s_df)
 
-    # Detailed Invoice Summary (Marg/Tally Style)
     tot_gross = calc_s_df["Gross Amt"].sum()
     tot_disc = calc_s_df["Disc Amt"].sum()
     tot_taxable = calc_s_df["Taxable Value"].sum()
@@ -268,12 +412,10 @@ with tab1:
             valid_df["Invoice No"] = s_inv_no
             valid_df["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
 
-            # Save to Stock Sales History
             st.session_state["sales_history"] = pd.concat(
                 [st.session_state["sales_history"], valid_df], ignore_index=True
             )
 
-            # Post Debit to Ledger
             new_ledger = {
                 "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
                 "Party Name": final_s_party,
@@ -291,117 +433,11 @@ with tab1:
                 ignore_index=True,
             )
 
-            # Reset state
             st.session_state["sales_data"] = get_empty_invoice_df()
             st.session_state["scanned_s_party"] = ""
             st.success(
                 f"🎉 सेल बिल सेव हो गया और {final_s_party} के लेजर में ₹{grand_total:,.2f} Debit हो गया!"
             )
-
-
-# ------------------------------------------
-# TAB 2: PURCHASE INVOICE (INWARD)
-# ------------------------------------------
-with tab2:
-    st.header("📦 Marg / Tally Style Purchase Invoice")
-
-    col_p1, col_p2 = st.columns([1, 1])
-
-    with col_p1:
-        st.subheader("📷 Auto-Scan Purchase Bill")
-        p_file = st.file_uploader(
-            "Upload Purchase Slip Image",
-            type=["jpg", "png", "jpeg"],
-            key="p_file",
-        )
-        if p_file:
-            st.image(p_file, caption="Uploaded Slip", width=180)
-            if st.button("🚀 Auto-Scan Purchase Bill", key="btn_p_scan"):
-                with st.spinner("⚡ AI स्कैनिंग चल रही है..."):
-                    try:
-                        res = scan_slip_with_party_ai(p_file, "purchase")
-                        st.session_state["purchase_data"] = pd.DataFrame(
-                            res.get("Items", [])
-                        )
-                        st.session_state["scanned_p_party"] = res.get(
-                            "Party Name", ""
-                        )
-                        st.success("✅ स्कैन पूरा हो गया!")
-                    except Exception as e:
-                        st.error(f"स्कैन त्रुटि: {str(e)}")
-
-    with col_p2:
-        st.subheader("✍️ Supplier Details (Editable)")
-        p_suppliers = st.session_state["party_master"][
-            st.session_state["party_master"]["Type"] == "Supplier"
-        ]["Party Name"].tolist()
-
-        default_s = (
-            st.session_state["scanned_p_party"]
-            if st.session_state["scanned_p_party"]
-            else (
-                p_suppliers[0]
-                if p_suppliers
-                else "MEDICARE PHARMA DISTRIBUTORS"
-            )
-        )
-
-        final_p_party = st.text_input(
-            "✏️ Party / Supplier Name", value=default_s, key="txt_p_party"
-        )
-        p_inv_no = st.text_input(
-            "✏️ Bill No.", "PUR-2026-001", key="txt_p_inv"
-        )
-
-    st.markdown("---")
-    st.subheader("📝 Products, Deals & Rate Entries")
-
-    edited_p_df = st.data_editor(
-        st.session_state["purchase_data"],
-        key="p_table_editor",
-        num_rows="dynamic",
-        use_container_width=True,
-    )
-
-    calc_p_df = calculate_pharma_bill(edited_p_df)
-
-    p_grand_total = calc_p_df["Net Line Amount"].sum()
-    st.info(f"💰 Total Purchase Amount Payable: ₹{p_grand_total:,.2f}")
-
-    if st.button("📥 Save Purchase Invoice & Post to Ledger", key="btn_save_pur_final"):
-        if not final_p_party.strip():
-            st.error("⚠️ कृपया सप्लायर का नाम दर्ज करें!")
-        else:
-            valid_p = calc_p_df[
-                calc_p_df["Product Name"].astype(str).str.strip() != ""
-            ].copy()
-            valid_p["Party Name"] = final_p_party
-
-            st.session_state["purchase_history"] = pd.concat(
-                [st.session_state["purchase_history"], valid_p],
-                ignore_index=True,
-            )
-
-            new_ledger = {
-                "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
-                "Party Name": final_p_party,
-                "Voucher Type": "Purchase Invoice",
-                "Ref No": p_inv_no,
-                "Debit (Dr)": 0.0,
-                "Credit (Cr)": float(p_grand_total),
-                "Remarks": f"Pharma Purchase Invoice #{p_inv_no}",
-            }
-            st.session_state["ledger_transactions"] = pd.concat(
-                [
-                    st.session_state["ledger_transactions"],
-                    pd.DataFrame([new_ledger]),
-                ],
-                ignore_index=True,
-            )
-
-            st.session_state["purchase_data"] = get_empty_invoice_df()
-            st.session_state["scanned_p_party"] = ""
-            st.success("🎉 परचेज बिल सेव हो गया और सप्लायर लेजर में Credit हो गया!")
 
 
 # ------------------------------------------
