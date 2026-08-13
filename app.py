@@ -20,7 +20,7 @@ st.title("💊 Pharma Inventory & Smart Billing System")
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Initialize Global Session States for Data Persistence
+# Initialize Global Session States
 if "purchase_data" not in st.session_state:
     st.session_state["purchase_data"] = pd.DataFrame()
 
@@ -29,7 +29,7 @@ if "sales_data" not in st.session_state:
 
 
 # ==========================================
-# 2. HELPER FUNCTIONS (Compression & Fast AI Scan)
+# 2. DYNAMIC MODEL SCANNER & COMPRESSION
 # ==========================================
 
 
@@ -39,7 +39,6 @@ def compress_image(uploaded_file, max_dimension=1280, quality=75):
     if img.mode != "RGB":
         img = img.convert("RGB")
 
-    # Aspect Ratio बनाए रखते हुए रिसाइज़ करें
     img.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
 
     buffer = BytesIO()
@@ -47,8 +46,36 @@ def compress_image(uploaded_file, max_dimension=1280, quality=75):
     return buffer.getvalue()
 
 
+def get_active_vision_models():
+    """गूगल API से वर्तमान में चालू (Active) मॉडल्स की लिस्ट स्वतः प्राप्त करता है"""
+    try:
+        active_models = []
+        for m in genai.list_models():
+            if "generateContent" in m.supported_generation_methods:
+                model_name = m.name.replace("models/", "")
+                active_models.append(model_name)
+
+        # ⚡ तेज़ प्रोसेसिंग के लिए 'flash' मॉडल्स को प्राथमिकता दें
+        flash_models = [
+            m
+            for m in active_models
+            if "flash" in m.lower() and "experimental" not in m.lower()
+        ]
+        other_models = [
+            m
+            for m in active_models
+            if "flash" not in m.lower() and "experimental" not in m.lower()
+        ]
+
+        combined = flash_models + other_models
+        return combined if combined else ["gemini-1.5-flash", "gemini-2.5-flash"]
+    except Exception:
+        # बैकअप डिफ़ॉल्ट मॉडल्स
+        return ["gemini-1.5-flash", "gemini-2.5-flash"]
+
+
 def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
-    """बिना टाइम गवाए वर्किंग मॉडल से फ़ास्ट स्कैन करने वाला फ़ंक्शन (Automatic Fallback)"""
+    """डायनामिक मॉडल सिलेक्शन के साथ बुलेटप्रूफ ऑटो-स्कैनर"""
     # 1. Image Compression
     compressed_bytes = compress_image(uploaded_file)
 
@@ -67,27 +94,27 @@ def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
     ]
     """
 
-    # 🚀 स्टेबल मॉडल्स की फ़ास्ट लिस्ट (अगर पहला काम न करे, तो तुरंत दूसरा चलेगा)
-    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+    # 🚀 लाइव चालू मॉडल्स की लिस्ट प्राप्त करें
+    available_models = get_active_vision_models()
 
     response = None
     last_error = None
 
-    for model_name in models_to_try:
+    for model_name in available_models:
         try:
             model = genai.GenerativeModel(model_name)
             response = model.generate_content(
                 [prompt, {"mime_type": "image/jpeg", "data": compressed_bytes}]
             )
             if response and response.text:
-                break  # पहला मॉडल काम करते ही लूप तुरंत बंद हो जाएगा
+                break
         except Exception as e:
             last_error = e
-            continue  # अगर मॉडल अनुपलब्ध हो, तो बिना समय गंवाए अगले मॉडल पर स्विच करें
+            continue
 
-    if not response:
+    if not response or not response.text:
         raise Exception(
-            f"स्कैन पूरा नहीं हो सका। कृपया अपनी Gemini API Key जांचें। (Details: {last_error})"
+            f"स्कैन पूरा नहीं हो सका। कृपया अपनी API Key या नेटवर्क जांचें। (Error: {last_error})"
         )
 
     clean_json = (
@@ -97,7 +124,7 @@ def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
 
 
 # ==========================================
-# 3. MULTI-TAB NAVIGATION (All Features Included)
+# 3. MULTI-TAB NAVIGATION (All Features)
 # ==========================================
 tab1, tab2, tab3 = st.tabs(
     [
@@ -125,7 +152,7 @@ with tab1:
         st.image(p_file, caption="Uploaded Purchase Slip", width=300)
 
         if st.button("🚀 Fast Auto-Scan & Match with Stock", key="btn_p_scan"):
-            with st.spinner("⚡ AI सुपर-फ़ास्ट स्पीड में पर्ची स्कैन कर रहा है..."):
+            with st.spinner("⚡ AI एक्टिव मॉडल से पर्ची स्कैन कर रहा है..."):
                 try:
                     data = scan_slip_with_ai(p_file, "purchase")
                     st.session_state["purchase_data"] = pd.DataFrame(data)
@@ -163,7 +190,7 @@ with tab2:
                     data = scan_slip_with_ai(s_file, "sales")
                     df = pd.DataFrame(data)
 
-                    # ऑटोमैटिक रेट (20% डिस्काउंट) और Taxable Amount की गणना
+                    # ऑटोमैटिक रेट (20% डिस्काउंट) और Taxable Amount कैलकुलेशन
                     df["Rate"] = (df["MRP"] * 0.80).round(2)
                     df["Taxable Amount"] = (df["Qty"] * df["Rate"]).round(2)
 
@@ -216,7 +243,7 @@ with tab3:
         sgst = round(subtotal * 0.06, 2)
         total_bill = round(subtotal + cgst + sgst, 2)
 
-        # Generate Printable HTML Table Rows
+        # HTML Table Rows Generation
         html_rows = ""
         for idx, row in current_df.iterrows():
             html_rows += f"""
@@ -230,7 +257,7 @@ with tab3:
             </tr>
             """
 
-        # HTML Printable Template with Direct Print / Save as PDF Option
+        # HTML Printable Invoice Layout
         html_bill = f"""
         <!DOCTYPE html>
         <html>
