@@ -16,12 +16,11 @@ st.set_page_config(
 
 st.title("💊 Pharma Inventory & Smart Billing System")
 
-# Gemini API Key Setup
-# st.secrets ["GEMINI_API_KEY"] का प्रयोग करें या अपनी API Key डालें
+# Gemini API Key Setup (Streamlit Secrets से स्वतः कनेक्ट होगा)
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
-# Global Session State Initialization
+# Initialize Global Session States for Data Persistence
 if "purchase_data" not in st.session_state:
     st.session_state["purchase_data"] = pd.DataFrame()
 
@@ -30,12 +29,12 @@ if "sales_data" not in st.session_state:
 
 
 # ==========================================
-# 2. HELPER FUNCTIONS (Compression & AI Scan)
+# 2. HELPER FUNCTIONS (Compression & Fast AI Scan)
 # ==========================================
 
 
-# 🚀 फोटो को 3.5 MB से घटकर ~200 KB करने का फ़ंक्शन (सुपरफास्ट प्रोसेसिंग के लिए)
 def compress_image(uploaded_file, max_dimension=1280, quality=75):
+    """3.5 MB की भारी फोटो को ~200 KB में बदलकर स्कैनिंग स्पीड 10x तेज़ करने का फ़ंक्शन"""
     img = Image.open(uploaded_file)
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -48,12 +47,12 @@ def compress_image(uploaded_file, max_dimension=1280, quality=75):
     return buffer.getvalue()
 
 
-# 🧠 AI Image Scanner Function
 def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
-    # 1. Fast Image Compression
+    """बिना टाइम गवाए वर्किंग मॉडल से फ़ास्ट स्कैन करने वाला फ़ंक्शन (Automatic Fallback)"""
+    # 1. Image Compression
     compressed_bytes = compress_image(uploaded_file)
 
-    # 2. Gemini Prompt
+    # 2. Optimized Prompt
     prompt = f"""
     Extract all product details from this {slip_type} order slip image.
     Extract exactly 3 columns:
@@ -68,10 +67,28 @@ def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
     ]
     """
 
-    model = genai.GenerativeModel("gemini-2.5-flash")
-    response = model.generate_content(
-        [prompt, {"mime_type": "image/jpeg", "data": compressed_bytes}]
-    )
+    # 🚀 स्टेबल मॉडल्स की फ़ास्ट लिस्ट (अगर पहला काम न करे, तो तुरंत दूसरा चलेगा)
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+
+    response = None
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            model = genai.GenerativeModel(model_name)
+            response = model.generate_content(
+                [prompt, {"mime_type": "image/jpeg", "data": compressed_bytes}]
+            )
+            if response and response.text:
+                break  # पहला मॉडल काम करते ही लूप तुरंत बंद हो जाएगा
+        except Exception as e:
+            last_error = e
+            continue  # अगर मॉडल अनुपलब्ध हो, तो बिना समय गंवाए अगले मॉडल पर स्विच करें
+
+    if not response:
+        raise Exception(
+            f"स्कैन पूरा नहीं हो सका। कृपया अपनी Gemini API Key जांचें। (Details: {last_error})"
+        )
 
     clean_json = (
         response.text.replace("```json", "").replace("```", "").strip()
@@ -80,7 +97,7 @@ def scan_slip_with_ai(uploaded_file, slip_type="purchase"):
 
 
 # ==========================================
-# 3. MULTI-TAB NAVIGATION (All Features)
+# 3. MULTI-TAB NAVIGATION (All Features Included)
 # ==========================================
 tab1, tab2, tab3 = st.tabs(
     [
@@ -92,7 +109,7 @@ tab1, tab2, tab3 = st.tabs(
 
 
 # ------------------------------------------
-# TAB 1: PURCHASE SLIP SCANNER (पुराना फ़ीचर)
+# TAB 1: PURCHASE ENTRY (Inward Stock Scanner)
 # ------------------------------------------
 with tab1:
     st.header("📦 Purchase / Stock Inward Entry")
@@ -108,7 +125,7 @@ with tab1:
         st.image(p_file, caption="Uploaded Purchase Slip", width=300)
 
         if st.button("🚀 Fast Auto-Scan & Match with Stock", key="btn_p_scan"):
-            with st.spinner("⚡ AI फोटो को कम्प्रेस करके स्कैन कर रहा है..."):
+            with st.spinner("⚡ AI सुपर-फ़ास्ट स्पीड में पर्ची स्कैन कर रहा है..."):
                 try:
                     data = scan_slip_with_ai(p_file, "purchase")
                     st.session_state["purchase_data"] = pd.DataFrame(data)
@@ -127,7 +144,7 @@ with tab1:
 
 
 # ------------------------------------------
-# TAB 2: SALES SLIP SCANNER (नया फ़ीचर)
+# TAB 2: SALES SLIP SCANNER (Outward Sales Entry)
 # ------------------------------------------
 with tab2:
     st.header("🧾 Sales Order Slip Scanner")
@@ -146,7 +163,7 @@ with tab2:
                     data = scan_slip_with_ai(s_file, "sales")
                     df = pd.DataFrame(data)
 
-                    # ऑटोमैटिक रेट (20% डिस्काउंट मानकर) और अमाउंट की कैलकुलेशन
+                    # ऑटोमैटिक रेट (20% डिस्काउंट) और Taxable Amount की गणना
                     df["Rate"] = (df["MRP"] * 0.80).round(2)
                     df["Taxable Amount"] = (df["Qty"] * df["Rate"]).round(2)
 
@@ -174,7 +191,7 @@ with tab2:
 
 
 # ------------------------------------------
-# TAB 3: PRINTABLE INVOICE / PDF (नया फ़ीचर)
+# TAB 3: PRINTABLE INVOICE / PDF GENERATOR
 # ------------------------------------------
 with tab3:
     st.header("🖨️ Printable Tax Invoice Generator")
@@ -193,7 +210,7 @@ with tab3:
 
         current_df = st.session_state["sales_data"]
 
-        # Calculate Values for Invoice
+        # Calculate Summary Values
         subtotal = current_df["Taxable Amount"].sum()
         cgst = round(subtotal * 0.06, 2)
         sgst = round(subtotal * 0.06, 2)
@@ -213,7 +230,7 @@ with tab3:
             </tr>
             """
 
-        # HTML Printable Template with Direct Print Button
+        # HTML Printable Template with Direct Print / Save as PDF Option
         html_bill = f"""
         <!DOCTYPE html>
         <html>
@@ -246,7 +263,7 @@ with tab3:
                         </td>
                         <td style="text-align: right;">
                             <h3 style="margin:0; color:#d9534f;">TAX INVOICE</h3>
-                            <p style="margin:5px 0; font-size:12px;"><b>Invoice No:</b> {inv_no}<br><b>Date:</b> 13-Aug-2026</p>
+                            <p style="margin:5px 0; font-size:12px;"><b>Invoice No:</b> {inv_no}</p>
                         </td>
                     </tr>
                 </table>
@@ -293,5 +310,4 @@ with tab3:
         </html>
         """
 
-        # Streamlit Embed View
         st.components.v1.html(html_bill, height=600, scrolling=True)
