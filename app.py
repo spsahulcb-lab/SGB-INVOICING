@@ -1,80 +1,45 @@
+import base64
 from io import BytesIO
 import json
 import google.generativeai as genai
 import pandas as pd
-from PIL import Image
+from PIL import Image, ImageDraw, ImageFont
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 0. PAGE CONFIGURATION & ORANGE-WHITE THEME
+# 1. PAGE SETUP & ORANGE-WHITE THEME
 # ==========================================
 st.set_page_config(
-    page_title="Pharma ERP - Sales & Management Hub",
+    page_title="Pharma ERP - Smart Invoicing & Management",
     layout="wide",
     page_icon="💊",
 )
 
-# Custom Orange & White Styling Injection
 st.markdown(
     """
     <style>
-    /* Main Background & Text */
-    .stApp {
-        background-color: #FAFAFA;
-        color: #1E1E1E;
-    }
-    
-    /* Header Bar / Accent */
-    header[data-testid="stHeader"] {
-        background-color: #FF6600 !important;
-    }
-    
-    /* Custom Card Style */
-    .metric-card {
-        background-color: #FFFFFF;
-        border-left: 5px solid #FF6600;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-        margin-bottom: 10px;
-    }
-    
-    /* Buttons Customization */
+    .stApp { background-color: #FAFAFA; }
+    header[data-testid="stHeader"] { background-color: #FF6600 !important; }
     .stButton>button {
         background-color: #FF6600 !important;
         color: white !important;
         border-radius: 6px !important;
         border: none !important;
         font-weight: bold !important;
-        transition: 0.3s;
     }
-    .stButton>button:hover {
-        background-color: #E05500 !important;
-        box-shadow: 0 4px 8px rgba(255, 102, 0, 0.3);
-    }
-
-    /* Tab Styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        background-color: #FFFFFF;
-        border-radius: 6px 6px 0px 0px;
-        padding: 8px 16px;
-        color: #444444;
-    }
+    .stButton>button:hover { background-color: #E05500 !important; }
     .stTabs [aria-selected="true"] {
         background-color: #FF6600 !important;
         color: white !important;
     }
     </style>
-    """,
+""",
     unsafe_allow_html=True,
 )
 
 # ==========================================
-# 1. PERMANENT CLOUD DB ENGINE
+# 2. CLOUD DATABASE CONNECTION (Google Sheets)
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -96,13 +61,100 @@ def save_cloud_table(df, worksheet_name):
 
 
 # ==========================================
-# 2. AI & SESSION INITIALIZATION
+# 3. MATH ENGINE & JPG INVOICE GENERATOR
+# ==========================================
+def safe_calculate_bill(df):
+    """TypeError और स्ट्रिंग एरर फिक्स करने वाला मैथ इंजन"""
+    calc_df = df.copy()
+    cols = ["MRP", "Qty", "Free Deal", "Rate", "Disc %", "GST %"]
+    for c in cols:
+        if c in calc_df.columns:
+            calc_df[c] = pd.to_numeric(calc_df[c], errors="coerce").fillna(0.0)
+
+    calc_df["Gross"] = calc_df["Qty"] * calc_df["Rate"]
+    calc_df["Disc_Amt"] = (calc_df["Gross"] * calc_df["Disc %"]) / 100.0
+    calc_df["Taxable"] = calc_df["Gross"] - calc_df["Disc_Amt"]
+    calc_df["GST_Amt"] = (calc_df["Taxable"] * calc_df["GST %"]) / 100.0
+    calc_df["Net_Amt"] = (calc_df["Taxable"] + calc_df["GST_Amt"]).round(2)
+    return calc_df
+
+
+def generate_jpg_invoice(party_name, inv_no, date_str, items_df, grand_total):
+    """Pillow लाइब्रेरी की मदद से बिल की HD JPG फोटो जनरेट करता है"""
+    width, height = 800, 1000
+    img = Image.new("RGB", (width, height), color="white")
+    draw = ImageDraw.Draw(img)
+
+    # 1. Header (Orange Banner)
+    draw.rectangle([(0, 0), (width, 90)], fill="#FF6600")
+    draw.text(
+        (30, 30),
+        "PHARMA DISTRIBUTORS - INVOICE",
+        fill="white",
+        font_size=26,
+    )
+
+    # 2. Invoice Metadata
+    draw.text((30, 110), f"Invoice No: {inv_no}", fill="#333333", font_size=18)
+    draw.text((450, 110), f"Date: {date_str}", fill="#333333", font_size=18)
+    draw.text(
+        (30, 145), f"Customer: {party_name}", fill="#333333", font_size=18
+    )
+
+    # 3. Table Headers
+    draw.rectangle([(30, 190), (770, 230)], fill="#FF6600")
+    draw.text((40, 202), "Product Name", fill="white", font_size=16)
+    draw.text((320, 202), "Qty", fill="white", font_size=16)
+    draw.text((410, 202), "Rate", fill="white", font_size=16)
+    draw.text((510, 202), "GST %", fill="white", font_size=16)
+    draw.text((640, 202), "Net Total (₹)", fill="white", font_size=16)
+
+    # 4. Items Rows
+    y_pos = 250
+    for _, r in items_df.iterrows():
+        p_name = str(r.get("Product Name", ""))[:22]
+        qty = str(int(r.get("Qty", 0)))
+        rate = f"₹{r.get('Rate', 0):.2f}"
+        gst = f"{r.get('GST %', 0):.1f}%"
+        net_amt = f"₹{r.get('Net_Amt', 0):,.2f}"
+
+        draw.text((40, y_pos), p_name, fill="#1E1E1E", font_size=15)
+        draw.text((320, y_pos), qty, fill="#1E1E1E", font_size=15)
+        draw.text((410, y_pos), rate, fill="#1E1E1E", font_size=15)
+        draw.text((510, y_pos), gst, fill="#1E1E1E", font_size=15)
+        draw.text((640, y_pos), net_amt, fill="#1E1E1E", font_size=15)
+
+        y_pos += 30
+        draw.line([(30, y_pos), (770, y_pos)], fill="#E0E0E0", width=1)
+        y_pos += 10
+
+    # 5. Grand Total Section
+    y_pos += 20
+    draw.rectangle(
+        [(30, y_pos), (770, y_pos + 50)], fill="#FFF3EB", outline="#FF6600"
+    )
+    draw.text(
+        (50, y_pos + 14),
+        f"Grand Total Payable: ₹{grand_total:,.2f}",
+        fill="#FF6600",
+        font_size=20,
+    )
+
+    # Output Bytes
+    buffer = BytesIO()
+    img.save(buffer, format="JPEG", quality=95)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# ==========================================
+# 4. INITIALIZATION & SIDEBAR
 # ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 
-def get_empty_invoice_df():
+def get_empty_df():
     return pd.DataFrame(
         [
             {
@@ -118,270 +170,196 @@ def get_empty_invoice_df():
     )
 
 
-# Session Buffers
 if "sales_data" not in st.session_state:
-    st.session_state["sales_data"] = get_empty_invoice_df()
+    st.session_state["sales_data"] = get_empty_df()
 
-if "scanned_s_party" not in st.session_state:
-    st.session_state["scanned_s_party"] = ""
-
-# Master Defaults
-default_salesmen = pd.DataFrame(
-    [
-        {
-            "Salesman ID": "SM101",
-            "Name": "Rahul Verma",
-            "Mobile": "9876543210",
-            "Target (₹)": 500000,
-        },
-        {
-            "Salesman ID": "SM102",
-            "Name": "Amit Sharma",
-            "Mobile": "9876543211",
-            "Target (₹)": 400000,
-        },
-    ]
-)
-
+# Master Tables
 default_party = pd.DataFrame(
     [
-        {
-            "Party Name": "SHREE RAM MEDICAL STORE",
-            "Type": "Customer",
-            "City": "Faizabad",
-            "GSTIN": "09AAAAA0000A1Z5",
-        },
-        {
-            "Party Name": "MEDICARE PHARMA DISTRIBUTORS",
-            "Type": "Supplier",
-            "City": "Lucknow",
-            "GSTIN": "09BBBBB1111B1Z2",
-        },
+        {"Party Name": "SHREE RAM MEDICAL STORE", "Type": "Customer", "Mobile": "9876543210"},
+        {"Party Name": "MEDICARE PHARMA DISTRIBUTORS", "Type": "Supplier", "Mobile": "9876543211"},
     ]
 )
 
-# Persistent Data Loading
-salesmen_df = load_cloud_table("salesmen_master", default_salesmen)
 party_df = load_cloud_table("party_master", default_party)
 sales_hist_df = load_cloud_table("sales_history", pd.DataFrame())
-ledger_df = load_cloud_table("ledger_transactions", pd.DataFrame())
+purchase_hist_df = load_cloud_table("purchase_history", pd.DataFrame())
+
+# Sidebar Menu
+st.sidebar.image("https://img.icons8.com/color/96/pill.png", width=50)
+st.sidebar.title("💊 Pharma ERP Menu")
+
+user_role = st.sidebar.radio("👤 Choose Role:", ["Sales Executive", "Manager"])
+user_name = st.sidebar.text_input("✍️ Enter Your Name:", value="Rahul")
+
+pwd = ""
+if user_role == "Manager":
+    pwd = st.sidebar.text_input("🔐 Manager PIN:", type="password")
+
+# Module Navigation
+tabs_list = [
+    "🧾 Sales Invoice",
+    "📦 Purchase Entry",
+    "📊 Live Stock Inventory",
+]
+if user_role == "Manager":
+    tabs_list.append("👑 Manager Monitoring")
+
+active_tab = st.selectbox("📌 Select Module:", tabs_list)
 
 # ==========================================
-# 3. SIDEBAR: ROLE & USER LOGIN
+# MODULE 1: SALES INVOICE & JPG / WHATSAPP SHARE
 # ==========================================
-st.sidebar.image(
-    "https://img.icons8.com/color/96/pill.png", width=60
-)
-st.sidebar.title("💊 Pharma ERP System")
+if active_tab == "🧾 Sales Invoice":
+    st.header("🧾 New Sales Invoice (JPG & WhatsApp Direct)")
 
-user_role = st.sidebar.radio(
-    "👤 Select Your Role (अपना रोल चुनें):",
-    ["Sales Executive (सेल्समैन)", "Manager / Owner (मैनेजर)"],
-)
-
-current_salesman = "Admin"
-if user_role == "Sales Executive (सेल्समैन)":
-    salesman_list = salesmen_df["Name"].tolist() if not salesmen_df.empty else ["Default Salesman"]
-    current_salesman = st.sidebar.selectbox("🔑 Select Your Name (अपना नाम चुनें):", salesman_list)
-    st.sidebar.info(f"Logged as: **{current_salesman}**")
-else:
-    admin_password = st.sidebar.text_input("🔐 Manager PIN / Password:", type="password")
-    if admin_password != "1234":  # आप पासवर्ड बदल सकते हैं
-        st.sidebar.warning("मैनेजर पैनल एक्सेस करने के लिए सही पिन (1234) दर्ज करें।")
-
-# ==========================================
-# 4. CACHED AI SCANNER ENGINE
-# ==========================================
-@st.cache_data(ttl=3600)
-def get_cached_working_models():
-    try:
-        active_models = []
-        for m in genai.list_models():
-            if "generateContent" in m.supported_generation_methods:
-                active_models.append(m.name.replace("models/", ""))
-        flash_models = [m for m in active_models if "flash" in m.lower()]
-        return flash_models if flash_models else ["gemini-1.5-flash"]
-    except Exception:
-        return ["gemini-1.5-flash"]
-
-
-def scan_slip_ai(uploaded_file):
-    prompt = """
-    Extract handwritten pharma invoice items into JSON format with keys:
-    "Party Name" and "Items" array containing "Product Name", "MRP", "Qty", "Free Deal", "Rate", "Disc %", "GST %".
-    """
-    models = get_cached_working_models()
-    for m in models:
-        try:
-            res = genai.GenerativeModel(m).generate_content(
-                [prompt, {"mime_type": uploaded_file.type, "data": uploaded_file.getvalue()}]
-            )
-            if res and res.text:
-                clean = res.text.replace("```json", "").replace("```", "").strip()
-                return json.loads(clean)
-        except Exception:
-            continue
-    return {}
-
-# ==========================================
-# 5. APP INTERFACE BASED ON ROLE
-# ==========================================
-
-# ------------------------------------------
-# OPTION A: SALES EXECUTIVE APP VIEW
-# ------------------------------------------
-if user_role == "Sales Executive (सेल्समैन)":
-    st.markdown(f"### 🍊 Sales Dashboard — Welcome, **{current_salesman}**")
-
-    st_tab1, st_tab2 = st.tabs(["📝 New Sales Invoice (नया बिल बनाएं)", "📊 My Daily Sales (मेरी बिक्री)"])
-
-    with st_tab1:
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            s_file = st.file_uploader("📷 Upload Slip Image (optional)", type=["jpg", "png", "jpeg"])
-            if s_file and st.button("🚀 Auto-Scan Bill"):
-                with st.spinner("Scanning..."):
-                    parsed = scan_slip_ai(s_file)
-                    if parsed:
-                        st.session_state["sales_data"] = pd.DataFrame(parsed.get("Items", []))
-                        st.session_state["scanned_s_party"] = parsed.get("Party Name", "")
-                        st.success("✅ Scanning Done!")
-
-        with c2:
-            cust_list = party_df[party_df["Type"] == "Customer"]["Party Name"].tolist() if not party_df.empty else []
-            s_party = st.selectbox("🏬 Select Party/Customer", cust_list if cust_list else ["Cash"])
-            inv_no = st.text_input("📄 Invoice No.", f"INV-{pd.Timestamp.now().strftime('%d%m%H%M')}")
-
-        st.subheader("📦 Invoice Items Grid")
-        edited_s = st.data_editor(st.session_state["sales_data"], num_rows="dynamic", use_container_width=True)
-
-        # Calculation Engine
-        edited_s["Gross"] = edited_s["Qty"] * edited_s["Rate"]
-        edited_s["Net Amt"] = edited_s["Gross"] - (edited_s["Gross"] * edited_s["Disc %"] / 100)
-        edited_s["Total Inc Tax"] = edited_s["Net Amt"] * (1 + edited_s["GST %"] / 100)
-        tot_bill_val = edited_s["Total Inc Tax"].sum()
-
-        st.markdown(f"#### 💰 Total Invoice Value: **₹{tot_bill_val:,.2f}**")
-
-        if st.button("💾 Save Bill & Send to Manager"):
-            valid_df = edited_s[edited_s["Product Name"].astype(str).str.strip() != ""].copy()
-            valid_df["Party Name"] = s_party
-            valid_df["Invoice No"] = inv_no
-            valid_df["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
-            valid_df["Salesman"] = current_salesman
-
-            updated_sales = pd.concat([sales_hist_df, valid_df], ignore_index=True)
-            save_cloud_table(updated_sales, "sales_history")
-
-            # Post to Ledger
-            new_ledger = {
-                "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
-                "Party Name": s_party,
-                "Voucher Type": "Sales Invoice",
-                "Ref No": inv_no,
-                "Debit (Dr)": float(tot_bill_val),
-                "Credit (Cr)": 0.0,
-                "Salesman": current_salesman,
-                "Remarks": f"Bill generated by {current_salesman}",
-            }
-            updated_ledger = pd.concat([ledger_df, pd.DataFrame([new_ledger])], ignore_index=True)
-            save_cloud_table(updated_ledger, "ledger_transactions")
-
-            st.session_state["sales_data"] = get_empty_invoice_df()
-            st.success("🎉 बिल सफलतापूर्वक सेव हो गया और मास्टर ऐप पर सिंक हो गया!")
-
-    with st_tab2:
-        st.subheader(f"📈 Today's Performance for {current_salesman}")
-        if not sales_hist_df.empty and "Salesman" in sales_hist_df.columns:
-            my_sales = sales_hist_df[sales_hist_df["Salesman"] == current_salesman]
-            st.metric("Total Bills Generated", len(my_sales["Invoice No"].unique()) if not my_sales.empty else 0)
-            st.dataframe(my_sales, use_container_width=True)
-        else:
-            st.info("अभी तक कोई बिक्री दर्ज नहीं की गई है।")
-
-# ------------------------------------------
-# OPTION B: MANAGER MASTER APP VIEW
-# ------------------------------------------
-else:
-    if admin_password == "1234":
-        st.markdown("### 👑 Manager Master Console — Realtime Multi-Salesman Overview")
-
-        m_tab1, m_tab2, m_tab3 = st.tabs(
-            [
-                "📊 All Salesmen Performance (लीडरबोर्ड)",
-                "📁 Compiled Billing Records (समेकित बिल)",
-                "👥 Manage Team (सेल्समैन जोड़ें)",
-            ]
+    c1, c2 = st.columns(2)
+    with c1:
+        cust_list = (
+            party_df[party_df["Type"] == "Customer"]["Party Name"].tolist()
+            if not party_df.empty
+            else ["Cash"]
+        )
+        s_party = st.selectbox("🏬 Customer / Party Name", cust_list)
+    with c2:
+        s_inv_no = st.text_input(
+            "📄 Invoice No.", f"INV-{pd.Timestamp.now().strftime('%d%H%M')}"
         )
 
-        with m_tab1:
-            st.subheader("🏆 Salesmen Live Leaderboard")
+    st.subheader("📦 Invoice Line Items")
+    edited_sales = st.data_editor(
+        st.session_state["sales_data"], num_rows="dynamic", use_container_width=True
+    )
 
-            if not sales_hist_df.empty and "Salesman" in sales_hist_df.columns:
-                perf_df = (
-                    sales_hist_df.groupby("Salesman")
-                    .agg(
-                        Total_Sales=("Total Inc Tax", "sum"),
-                        Total_Orders=("Invoice No", "nunique"),
-                    )
-                    .reset_index()
-                )
+    # Safe Calculations
+    calc_sales_df = safe_calculate_bill(edited_sales)
+    grand_total = calc_sales_df["Net_Amt"].sum()
 
-                col_a, col_b = st.columns([1, 2])
-                with col_a:
-                    st.dataframe(perf_df, use_container_width=True)
-                with col_b:
-                    st.bar_chart(perf_df, x="Salesman", y="Total_Sales")
-            else:
-                st.info("डेटाबेस में अभी कोई सेल रिकॉर्ड नहीं है।")
+    st.markdown(f"### 💰 Grand Total Value: **₹{grand_total:,.2f}**")
 
-        with m_tab2:
-            st.subheader("🔍 Consolidated Bills Filter & Download")
+    col_btn1, col_btn2 = st.columns(2)
 
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                selected_sm = st.selectbox(
-                    "Filter by Salesman:",
-                    ["All Salesmen"] + (salesmen_df["Name"].tolist() if not salesmen_df.empty else []),
-                )
+    with col_btn1:
+        if st.button("💾 Save Bill to Cloud"):
+            try:
+                valid_items = calc_sales_df[
+                    calc_sales_df["Product Name"].astype(str).str.strip() != ""
+                ].copy()
+                valid_items["Party Name"] = s_party
+                valid_items["Invoice No"] = s_inv_no
+                valid_items["Salesman"] = user_name
+                valid_items["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
 
-            filtered_df = sales_hist_df.copy()
-            if selected_sm != "All Salesmen" and not filtered_df.empty and "Salesman" in filtered_df.columns:
-                filtered_df = filtered_df[filtered_df["Salesman"] == selected_sm]
+                updated_history = pd.concat([sales_hist_df, valid_items], ignore_index=True)
+                save_cloud_table(updated_history, "sales_history")
+                st.success("🎉 बिल सफलतापूर्वक Google Sheets पर सेव हो गया!")
+            except Exception as e:
+                st.error(f"Save Error: {e}")
 
-            st.dataframe(filtered_df, use_container_width=True)
+    with col_btn2:
+        # JPG Generation & Share
+        valid_items_jpg = calc_sales_df[
+            calc_sales_df["Product Name"].astype(str).str.strip() != ""
+        ].copy()
 
-            if not filtered_df.empty:
-                csv = filtered_df.to_csv(index=False).encode("utf-8")
-                st.download_button(
-                    "📥 Download Consolidated Excel/CSV Report",
-                    data=csv,
-                    file_name="Master_Sales_Report.csv",
-                    mime="text/csv",
-                )
+        if not valid_items_jpg.empty:
+            jpg_bytes = generate_jpg_invoice(
+                s_party,
+                s_inv_no,
+                pd.Timestamp.now().strftime("%Y-%m-%d"),
+                valid_items_jpg,
+                grand_total,
+            )
 
-        with m_tab3:
-            st.subheader("➕ Add / Manage Sales Executives")
+            # JPG Image Download Button
+            st.download_button(
+                label="🖼️ Download JPG Bill Image",
+                data=jpg_bytes,
+                file_name=f"{s_inv_no}_{s_party}.jpg",
+                mime="image/jpeg",
+            )
 
-            with st.form("add_sm_form"):
-                sm_id = st.text_input("Salesman ID", f"SM{len(salesmen_df)+101}")
-                sm_name = st.text_input("Salesman Name")
-                sm_mob = st.text_input("Mobile No.")
-                sm_target = st.number_input("Monthly Target (₹)", value=500000)
+            # WhatsApp Direct Share Link
+            msg_text = f"नमस्कार {s_party}, आपका बिल #{s_inv_no} तैयार है। कुल राशि: ₹{grand_total:,.2f}। धन्यवाद!"
+            wa_url = f"https://api.whatsapp.com/send?text={msg_text}"
+            st.markdown(f"[📲 WhatsApp पर बिल टेक्स्ट शेयर करें]({wa_url})", unsafe_allow_html=True)
 
-                if st.form_submit_button("Save Salesman") and sm_name:
-                    new_sm = pd.DataFrame(
-                        [
-                            {
-                                "Salesman ID": sm_id,
-                                "Name": sm_name,
-                                "Mobile": sm_mob,
-                                "Target (₹)": sm_target,
-                            }
-                        ]
-                    )
-                    updated_sm_master = pd.concat([salesmen_df, new_sm], ignore_index=True)
-                    save_cloud_table(updated_sm_master, "salesmen_master")
-                    st.success(f"✅ सेल्समैन '{sm_name}' टीम में जुड़ गया!")
+            # Live Invoice Image Preview
+            st.image(jpg_bytes, caption="🖼️ Generated JPG Bill Preview", width=420)
 
-            st.dataframe(salesmen_df, use_container_width=True)
+# ==========================================
+# MODULE 2: PURCHASE ENTRY
+# ==========================================
+elif active_tab == "📦 Purchase Entry":
+    st.header("📦 Purchase Inward Entry")
+    supp_list = (
+        party_df[party_df["Type"] == "Supplier"]["Party Name"].tolist()
+        if not party_df.empty
+        else ["Default Supplier"]
+    )
+    p_party = st.selectbox("🏭 Supplier Name", supp_list)
+    p_inv_no = st.text_input("📄 Purchase Bill No.", "PUR-101")
+
+    p_df = st.data_editor(get_empty_df(), key="p_grid", num_rows="dynamic")
+    calc_p_df = safe_calculate_bill(p_df)
+
+    if st.button("📥 Save Purchase Stock"):
+        valid_p = calc_p_df[calc_p_df["Product Name"].astype(str).str.strip() != ""].copy()
+        valid_p["Party Name"] = p_party
+        valid_p["Invoice No"] = p_inv_no
+        valid_p["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
+
+        updated_pur = pd.concat([purchase_hist_df, valid_p], ignore_index=True)
+        save_cloud_table(updated_pur, "purchase_history")
+        st.success("✅ परचेज स्टॉक Google Sheets पर अपडेट हो गया!")
+
+# ==========================================
+# MODULE 3: LIVE STOCK INVENTORY
+# ==========================================
+elif active_tab == "📊 Live Stock Inventory":
+    st.header("📊 Live Stock Inventory Balance")
+
+    p_hist = purchase_hist_df if not purchase_hist_df.empty else pd.DataFrame()
+    s_hist = sales_hist_df if not sales_hist_df.empty else pd.DataFrame()
+
+    if p_hist.empty and s_hist.empty:
+        st.info("डेटाबेस में अभी कोई स्टॉक रिकॉर्ड नहीं मिला।")
+    else:
+        p_tot = (
+            p_hist.groupby("Product Name")["Qty"].sum().reset_index(name="Purchased")
+            if not p_hist.empty
+            else pd.DataFrame(columns=["Product Name", "Purchased"])
+        )
+        s_tot = (
+            s_hist.groupby("Product Name")["Qty"].sum().reset_index(name="Sold")
+            if not s_hist.empty
+            else pd.DataFrame(columns=["Product Name", "Sold"])
+        )
+
+        stock_df = pd.merge(p_tot, s_tot, on="Product Name", how="outer").fillna(0)
+        stock_df["Available Stock"] = stock_df["Purchased"] - stock_df["Sold"]
+        st.dataframe(stock_df, use_container_width=True)
+
+# ==========================================
+# MODULE 4: MANAGER MONITORING DASHBOARD
+# ==========================================
+elif active_tab == "👑 Manager Monitoring" and user_role == "Manager":
+    if pwd == "1234":
+        st.header("👑 Manager Realtime Monitoring Console")
+
+        if not sales_hist_df.empty and "Salesman" in sales_hist_df.columns:
+            st.subheader("📊 Salesman Leaderboard & Performance")
+            summary = (
+                sales_hist_df.groupby("Salesman")["Net_Amt"]
+                .sum()
+                .reset_index(name="Total Sales (₹)")
+            )
+            st.dataframe(summary, use_container_width=True)
+            st.bar_chart(summary.set_index("Salesman"))
+
+            st.subheader("📁 Complete Compiled Sales History Log")
+            st.dataframe(sales_hist_df, use_container_width=True)
+        else:
+            st.info("निगरानी के लिए अभी कोई बिक्री रिकॉर्ड उपलब्ध नहीं है।")
+    else:
+        st.warning("कृपया सही मैनेजर पिन (1234) दर्ज करें।")
