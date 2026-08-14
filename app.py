@@ -4,24 +4,52 @@ import google.generativeai as genai
 import pandas as pd
 from PIL import Image
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 1. PAGE SETUP & CONFIGURATION
+# 0. PAGE CONFIGURATION
 # ==========================================
 st.set_page_config(
-    page_title="Pharma ERP - Marg & Tally Style Billing",
+    page_title="Pharma ERP - Permanent Cloud Data",
     layout="wide",
     page_icon="💊",
 )
 
-st.title("💊 Pharma ERP - Marg & Tally Style Smart Invoicing")
+st.title("💊 Pharma ERP - Smart Invoicing & Permanent Cloud Database")
 
-# Gemini API Key Setup
+# ==========================================
+# 1. PERMANENT GOOGLE SHEETS ENGINE
+# ==========================================
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+
+def load_cloud_table(worksheet_name, default_df):
+    """Fetch data from Google Sheets; fallback to default if empty or error."""
+    try:
+        df = conn.read(worksheet=worksheet_name, ttl="0s")
+        if df is not None and not df.empty:
+            return df
+        return default_df
+    except Exception:
+        return default_df
+
+
+def save_cloud_table(df, worksheet_name):
+    """Save dataframe permanently to Google Sheets."""
+    try:
+        conn.update(worksheet=worksheet_name, data=df)
+        st.cache_data.clear()
+    except Exception as e:
+        st.error(f"Cloud Save Error in {worksheet_name}: {e}")
+
+
+# ==========================================
+# 2. GEMINI AI CONFIGURATION
+# ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 
-# Initialize Session Dataframes with Marg/Tally Pharma Columns
 def get_empty_invoice_df():
     return pd.DataFrame(
         [
@@ -32,12 +60,13 @@ def get_empty_invoice_df():
                 "Free Deal": 0,
                 "Rate": 0.0,
                 "Disc %": 0.0,
-                "GST %": 12.0,
+                "GST %": 5.0,  # Default 5.0% GST
             }
         ]
     )
 
 
+# Temporary draft session state
 if "purchase_data" not in st.session_state:
     st.session_state["purchase_data"] = get_empty_invoice_df()
 
@@ -50,49 +79,80 @@ if "scanned_p_party" not in st.session_state:
 if "scanned_s_party" not in st.session_state:
     st.session_state["scanned_s_party"] = ""
 
-# Party Master
+# Load Master Tables directly from Google Sheets
+default_party = pd.DataFrame(
+    [
+        {
+            "Party Name": "SHREE RAM MEDICAL STORE",
+            "Type": "Customer",
+            "City": "Faizabad",
+            "GSTIN": "09AAAAA0000A1Z5",
+        },
+        {
+            "Party Name": "MEDICARE PHARMA DISTRIBUTORS",
+            "Type": "Supplier",
+            "City": "Lucknow",
+            "GSTIN": "09BBBBB1111B1Z2",
+        },
+    ]
+)
+
+default_ledger = pd.DataFrame(
+    columns=[
+        "Date",
+        "Party Name",
+        "Voucher Type",
+        "Ref No",
+        "Debit (Dr)",
+        "Credit (Cr)",
+        "Remarks",
+    ]
+)
+
+default_history = pd.DataFrame(
+    columns=[
+        "Date",
+        "Party Name",
+        "Invoice No",
+        "Product Name",
+        "MRP",
+        "Qty",
+        "Free Deal",
+        "Rate",
+        "Disc %",
+        "GST %",
+        "Total Qty (Billed+Free)",
+        "Gross Amt",
+        "Disc Amt",
+        "Taxable Value",
+        "GST Amt",
+        "Net Line Amount",
+    ]
+)
+
 if "party_master" not in st.session_state:
-    st.session_state["party_master"] = pd.DataFrame(
-        [
-            {
-                "Party Name": "SHREE RAM MEDICAL STORE",
-                "Type": "Customer",
-                "City": "Faizabad",
-                "GSTIN": "09AAAAA0000A1Z5",
-            },
-            {
-                "Party Name": "MEDICARE PHARMA DISTRIBUTORS",
-                "Type": "Supplier",
-                "City": "Lucknow",
-                "GSTIN": "09BBBBB1111B1Z2",
-            },
-        ]
+    st.session_state["party_master"] = load_cloud_table(
+        "party_master", default_party
     )
 
-# Transaction Log (Ledger)
 if "ledger_transactions" not in st.session_state:
-    st.session_state["ledger_transactions"] = pd.DataFrame(
-        columns=[
-            "Date",
-            "Party Name",
-            "Voucher Type",
-            "Ref No",
-            "Debit (Dr)",
-            "Credit (Cr)",
-            "Remarks",
-        ]
+    st.session_state["ledger_transactions"] = load_cloud_table(
+        "ledger_transactions", default_ledger
     )
 
-# Stock Records
 if "purchase_history" not in st.session_state:
-    st.session_state["purchase_history"] = pd.DataFrame()
+    st.session_state["purchase_history"] = load_cloud_table(
+        "purchase_history", default_history
+    )
 
 if "sales_history" not in st.session_state:
-    st.session_state["sales_history"] = pd.DataFrame()
+    st.session_state["sales_history"] = load_cloud_table(
+        "sales_history", default_history
+    )
 
 
 # ==========================================
-# 2. DYNAMIC AI SCANNER & COMPRESSION ENGINE
+# 3. AI SCANNER ENGINE
 # ==========================================
 def compress_image(uploaded_file, max_dimension=1280, quality=75):
     img = Image.open(uploaded_file)
@@ -105,7 +165,6 @@ def compress_image(uploaded_file, max_dimension=1280, quality=75):
 
 
 def get_active_vision_models():
-    """Dynamically fetch all available models from Gemini API."""
     try:
         active_models = []
         for m in genai.list_models():
@@ -131,25 +190,17 @@ def get_active_vision_models():
 
 def scan_slip_with_party_ai(uploaded_file, slip_type="sales"):
     compressed_bytes = compress_image(uploaded_file)
-
     prompt = f"""
     Extract billing details from this {slip_type} invoice/slip image.
     Include:
-    1. Party Name (Store/Customer/Supplier name at the top. If not found, return "Unknown Party").
-    2. Items list with columns:
-       - "Product Name"
-       - "MRP" (float)
-       - "Qty" (int - billed quantity)
-       - "Free Deal" (int - free/scheme quantity, default 0)
-       - "Rate" (float - selling/purchase unit rate)
-       - "Disc %" (float - discount percentage, default 0.0)
-       - "GST %" (float - 5, 12, or 18, default 12.0)
+    1. Party Name
+    2. Items list: "Product Name", "MRP", "Qty", "Free Deal", "Rate", "Disc %", "GST %" (default 5.0)
 
-    Return ONLY a valid JSON object without markdown fences, like:
+    Return ONLY JSON:
     {{
-      "Party Name": "SHREE RAM MEDICAL STORE",
+      "Party Name": "STORE NAME",
       "Items": [
-        {{"Product Name": "ATPLEX SYP.", "MRP": 144.00, "Qty": 10, "Free Deal": 1, "Rate": 100.00, "Disc %": 5.0, "GST %": 12.0}}
+        {{"Product Name": "ITEM", "MRP": 100.0, "Qty": 10, "Free Deal": 0, "Rate": 80.0, "Disc %": 0.0, "GST %": 5.0}}
       ]
     }}
     """
@@ -170,7 +221,7 @@ def scan_slip_with_party_ai(uploaded_file, slip_type="sales"):
             continue
 
     if not response or not response.text:
-        raise Exception(f"स्कैन पूरा नहीं हो सका। Error: {last_error}")
+        raise Exception(f"Scanning failed: {last_error}")
 
     clean_json = (
         response.text.replace("```json", "").replace("```", "").strip()
@@ -179,18 +230,36 @@ def scan_slip_with_party_ai(uploaded_file, slip_type="sales"):
 
 
 # ==========================================
-# 3. BILL CALCULATOR ENGINE (MARG/TALLY MATH)
+# 4. CALCULATOR ENGINE
 # ==========================================
-def calculate_pharma_bill(df):
+def calculate_pharma_bill(df, is_sales=False):
     df_calc = df.copy()
     numeric_cols = ["MRP", "Qty", "Free Deal", "Rate", "Disc %", "GST %"]
     for col in numeric_cols:
         if col in df_calc.columns:
-            df_calc[col] = (
-                pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
+            df_calc[col] = pd.to_numeric(df_calc[col], errors="coerce").fillna(0)
+
+    # Auto-fetch MRP, Rate & GST from historical purchases for Sales
+    if is_sales and not st.session_state["purchase_history"].empty:
+        p_history = st.session_state["purchase_history"]
+        if "Product Name" in p_history.columns:
+            stock_lookup = (
+                p_history.groupby("Product Name")
+                .last()[["MRP", "Rate", "GST %"]]
+                .to_dict("index")
             )
 
-    # Marg/Tally Calculations
+            for idx, row in df_calc.iterrows():
+                p_name = str(row["Product Name"]).strip()
+                if p_name in stock_lookup:
+                    matched = stock_lookup[p_name]
+                    if float(row["MRP"]) == 0.0 and "MRP" in matched:
+                        df_calc.at[idx, "MRP"] = float(matched["MRP"])
+                    if float(row["Rate"]) == 0.0 and "Rate" in matched:
+                        df_calc.at[idx, "Rate"] = float(matched["Rate"])
+                    if float(row["GST %"]) == 0.0 and "GST %" in matched:
+                        df_calc.at[idx, "GST %"] = float(matched["GST %"])
+
     df_calc["Total Qty (Billed+Free)"] = df_calc["Qty"] + df_calc["Free Deal"]
     df_calc["Gross Amt"] = df_calc["Qty"] * df_calc["Rate"]
     df_calc["Disc Amt"] = (df_calc["Gross Amt"] * df_calc["Disc %"]) / 100.0
@@ -204,29 +273,26 @@ def calculate_pharma_bill(df):
 
 
 # ==========================================
-# 4. TABS SETUP
+# 5. TABS INTERFACE
 # ==========================================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(
     [
-        "📦 1. Purchase Invoice (Inward)",
-        "🧾 2. Sales Invoice (Marg/Tally Style)",
-        "📒 3. Party Ledger Statement",
+        "📦 1. Purchase Invoice",
+        "🧾 2. Sales Invoice",
+        "📒 3. Party Ledger",
         "📊 4. Live Stock Inventory",
-        "⚙️ 5. Party Master & Voucher Entry",
+        "⚙️ 5. Party Master & Vouchers",
     ]
 )
 
-
 # ------------------------------------------
-# TAB 1: PURCHASE INVOICE (INWARD)
+# TAB 1: PURCHASE INVOICE
 # ------------------------------------------
 with tab1:
-    st.header("📦 Marg / Tally Style Purchase Invoice")
-
+    st.header("📦 Purchase Invoice (Inward Entry)")
     col_p1, col_p2 = st.columns([1, 1])
 
     with col_p1:
-        st.subheader("📷 Auto-Scan Purchase Bill")
         p_file = st.file_uploader(
             "Upload Purchase Slip Image",
             type=["jpg", "png", "jpeg"],
@@ -249,11 +315,9 @@ with tab1:
                         st.error(f"स्कैन त्रुटि: {str(e)}")
 
     with col_p2:
-        st.subheader("✍️ Supplier Details (Editable)")
         p_suppliers = st.session_state["party_master"][
             st.session_state["party_master"]["Type"] == "Supplier"
         ]["Party Name"].tolist()
-
         default_s = (
             st.session_state["scanned_p_party"]
             if st.session_state["scanned_p_party"]
@@ -272,8 +336,6 @@ with tab1:
         )
 
     st.markdown("---")
-    st.subheader("📝 Products, Deals & Rate Entries (Direct Editing Table)")
-
     edited_p_df = st.data_editor(
         st.session_state["purchase_data"],
         key="p_table_editor",
@@ -281,12 +343,11 @@ with tab1:
         use_container_width=True,
     )
 
-    calc_p_df = calculate_pharma_bill(edited_p_df)
-
+    calc_p_df = calculate_pharma_bill(edited_p_df, is_sales=False)
     p_grand_total = calc_p_df["Net Line Amount"].sum()
     st.info(f"💰 Total Purchase Amount Payable: ₹{p_grand_total:,.2f}")
 
-    if st.button("📥 Save Purchase Invoice & Post to Ledger", key="btn_save_pur_final"):
+    if st.button("📥 Save Purchase Invoice", key="btn_save_pur_final"):
         if not final_p_party.strip():
             st.error("⚠️ कृपया सप्लायर का नाम दर्ज करें!")
         else:
@@ -294,12 +355,19 @@ with tab1:
                 calc_p_df["Product Name"].astype(str).str.strip() != ""
             ].copy()
             valid_p["Party Name"] = final_p_party
+            valid_p["Invoice No"] = p_inv_no
+            valid_p["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
 
+            # Save to Google Sheets
             st.session_state["purchase_history"] = pd.concat(
                 [st.session_state["purchase_history"], valid_p],
                 ignore_index=True,
             )
+            save_cloud_table(
+                st.session_state["purchase_history"], "purchase_history"
+            )
 
+            # Update Ledger
             new_ledger = {
                 "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
                 "Party Name": final_p_party,
@@ -307,7 +375,7 @@ with tab1:
                 "Ref No": p_inv_no,
                 "Debit (Dr)": 0.0,
                 "Credit (Cr)": float(p_grand_total),
-                "Remarks": f"Pharma Purchase Invoice #{p_inv_no}",
+                "Remarks": f"Purchase Bill #{p_inv_no}",
             }
             st.session_state["ledger_transactions"] = pd.concat(
                 [
@@ -316,22 +384,23 @@ with tab1:
                 ],
                 ignore_index=True,
             )
+            save_cloud_table(
+                st.session_state["ledger_transactions"], "ledger_transactions"
+            )
 
             st.session_state["purchase_data"] = get_empty_invoice_df()
             st.session_state["scanned_p_party"] = ""
-            st.success("🎉 परचेज बिल सेव हो गया और सप्लायर लेजर में Credit हो गया!")
+            st.success("🎉 परचेज बिल Google Sheet में सुरक्षित सेव हो गया!")
 
 
 # ------------------------------------------
-# TAB 2: SALES INVOICE (MARG / TALLY STYLE)
+# TAB 2: SALES INVOICE
 # ------------------------------------------
 with tab2:
-    st.header("🧾 Marg / Tally Style Pharma Sales Invoice")
-
+    st.header("🧾 Sales Invoice (Marg/Tally Style)")
     col_s1, col_s2 = st.columns([1, 1])
 
     with col_s1:
-        st.subheader("📷 Auto-Scan Bill Slip (Optional)")
         s_file = st.file_uploader(
             "Upload Sales Slip Image", type=["jpg", "png", "jpeg"], key="s_file"
         )
@@ -352,11 +421,9 @@ with tab2:
                         st.error(f"स्कैन त्रुटि: {str(e)}")
 
     with col_s2:
-        st.subheader("✍️ Header Details (Editable)")
         p_customers = st.session_state["party_master"][
             st.session_state["party_master"]["Type"] == "Customer"
         ]["Party Name"].tolist()
-
         default_c = (
             st.session_state["scanned_s_party"]
             if st.session_state["scanned_s_party"]
@@ -375,10 +442,6 @@ with tab2:
         )
 
     st.markdown("---")
-    st.subheader(
-        "📝 Product-wise Rates, Deals & Discounts Table (Direct Editing)"
-    )
-
     edited_s_df = st.data_editor(
         st.session_state["sales_data"],
         key="s_table_editor",
@@ -386,7 +449,7 @@ with tab2:
         use_container_width=True,
     )
 
-    calc_s_df = calculate_pharma_bill(edited_s_df)
+    calc_s_df = calculate_pharma_bill(edited_s_df, is_sales=True)
 
     tot_gross = calc_s_df["Gross Amt"].sum()
     tot_disc = calc_s_df["Disc Amt"].sum()
@@ -394,14 +457,13 @@ with tab2:
     tot_gst = calc_s_df["GST Amt"].sum()
     grand_total = calc_s_df["Net Line Amount"].sum()
 
-    st.markdown("#### 📊 Invoice Summary")
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Gross Total", f"₹{tot_gross:,.2f}")
     c2.metric("Total Discount (-)", f"₹{tot_disc:,.2f}")
     c3.metric("Taxable Value", f"₹{tot_taxable:,.2f}")
     c4.metric("Grand Total (Inc. GST)", f"₹{grand_total:,.2f}")
 
-    if st.button("💾 Save Sales Invoice & Post to Ledger", key="btn_save_sales_final"):
+    if st.button("💾 Save Sales Invoice", key="btn_save_sales_final"):
         if not final_s_party.strip():
             st.error("⚠️ कृपया पार्टी का नाम अवश्य लिखें!")
         else:
@@ -412,10 +474,15 @@ with tab2:
             valid_df["Invoice No"] = s_inv_no
             valid_df["Date"] = pd.Timestamp.now().strftime("%Y-%m-%d")
 
+            # Save to Google Sheets
             st.session_state["sales_history"] = pd.concat(
                 [st.session_state["sales_history"], valid_df], ignore_index=True
             )
+            save_cloud_table(
+                st.session_state["sales_history"], "sales_history"
+            )
 
+            # Update Ledger
             new_ledger = {
                 "Date": pd.Timestamp.now().strftime("%Y-%m-%d"),
                 "Party Name": final_s_party,
@@ -423,7 +490,7 @@ with tab2:
                 "Ref No": s_inv_no,
                 "Debit (Dr)": float(grand_total),
                 "Credit (Cr)": 0.0,
-                "Remarks": f"Pharma Sales Invoice #{s_inv_no}",
+                "Remarks": f"Sales Bill #{s_inv_no}",
             }
             st.session_state["ledger_transactions"] = pd.concat(
                 [
@@ -432,28 +499,30 @@ with tab2:
                 ],
                 ignore_index=True,
             )
+            save_cloud_table(
+                st.session_state["ledger_transactions"], "ledger_transactions"
+            )
 
             st.session_state["sales_data"] = get_empty_invoice_df()
             st.session_state["scanned_s_party"] = ""
-            st.success(
-                f"🎉 सेल बिल सेव हो गया और {final_s_party} के लेजर में ₹{grand_total:,.2f} Debit हो गया!"
-            )
+            st.success("🎉 सेल बिल Google Sheet में सुरक्षित सेव हो गया!")
 
 
 # ------------------------------------------
-# TAB 3: EDITABLE PARTY LEDGER STATEMENT
+# TAB 3: PARTY LEDGER
 # ------------------------------------------
 with tab3:
-    st.header("📒 Party Ledger Statement (Fully Editable)")
+    st.header("📒 Party Ledger Statement")
 
-    st.subheader("✏️ Master Transaction Journal (Edit Any Past Record)")
     edited_global_ledger = st.data_editor(
         st.session_state["ledger_transactions"],
         key="global_ledger_edit",
         num_rows="dynamic",
         use_container_width=True,
     )
-    st.session_state["ledger_transactions"] = edited_global_ledger
+    if not edited_global_ledger.equals(st.session_state["ledger_transactions"]):
+        st.session_state["ledger_transactions"] = edited_global_ledger
+        save_cloud_table(edited_global_ledger, "ledger_transactions")
 
     all_parties = st.session_state["party_master"]["Party Name"].tolist()
     if all_parties:
@@ -482,7 +551,7 @@ with tab3:
             col2.metric("Total Payments/Credit", f"₹{cr:,.2f}")
             col3.metric(
                 "Closing Balance",
-                f"₹{abs(bal):,.2f} {'Dr (बकाया पाना है)' if bal > 0 else 'Cr (देना बाकी है)' if bal < 0 else 'Cleared'}",
+                f"₹{abs(bal):,.2f} {'Dr (पाना है)' if bal > 0 else 'Cr (देना बाकी है)' if bal < 0 else 'Cleared'}",
             )
 
             st.dataframe(party_tx, use_container_width=True)
@@ -492,45 +561,58 @@ with tab3:
 # TAB 4: LIVE STOCK INVENTORY
 # ------------------------------------------
 with tab4:
-    st.header("📊 Stock Inventory (Including Free Scheme Deals)")
+    st.header("📊 Live Stock Inventory")
 
     p_hist = st.session_state["purchase_history"]
     s_hist = st.session_state["sales_history"]
 
-    if p_hist.empty:
-        st.info("स्टॉक में कोई आइटम उपलब्ध नहीं है।")
+    if p_hist.empty and s_hist.empty:
+        st.info("स्टॉक में अभी कोई डाटा उपलब्ध नहीं है।")
     else:
-        p_summary = (
-            p_hist.groupby("Product Name")["Total Qty (Billed+Free)"]
-            .sum()
-            .reset_index()
-            .rename(columns={"Total Qty (Billed+Free)": "Purchased Qty"})
-        )
+        p_summary = pd.DataFrame()
+        s_summary = pd.DataFrame()
 
-        if not s_hist.empty:
+        if not p_hist.empty and "Product Name" in p_hist.columns:
+            p_summary = (
+                p_hist.groupby("Product Name")["Total Qty (Billed+Free)"]
+                .sum()
+                .reset_index()
+                .rename(columns={"Total Qty (Billed+Free)": "Purchased Qty"})
+            )
+
+        if not s_hist.empty and "Product Name" in s_hist.columns:
             s_summary = (
                 s_hist.groupby("Product Name")["Total Qty (Billed+Free)"]
                 .sum()
                 .reset_index()
                 .rename(columns={"Total Qty (Billed+Free)": "Sold Qty"})
             )
+
+        if not p_summary.empty and not s_summary.empty:
             merged = pd.merge(
-                p_summary, s_summary, on="Product Name", how="left"
+                p_summary, s_summary, on="Product Name", how="outer"
             ).fillna(0)
-        else:
+        elif not p_summary.empty:
             merged = p_summary.copy()
             merged["Sold Qty"] = 0
+        elif not s_summary.empty:
+            merged = s_summary.copy()
+            merged["Purchased Qty"] = 0
+        else:
+            merged = pd.DataFrame()
 
-        merged["Current Stock Qty"] = merged["Purchased Qty"] - merged["Sold Qty"]
-        st.dataframe(merged, use_container_width=True)
+        if not merged.empty:
+            merged["Current Stock Qty"] = (
+                merged["Purchased Qty"] - merged["Sold Qty"]
+            )
+            st.dataframe(merged, use_container_width=True)
 
 
 # ------------------------------------------
-# TAB 5: PARTY MASTER & VOUCHER ENTRY
+# TAB 5: PARTY MASTER & VOUCHERS
 # ------------------------------------------
 with tab5:
     st.header("⚙️ Master Setup & Payment/Receipt Entries")
-
     col_m1, col_m2 = st.columns(2)
 
     with col_m1:
@@ -554,10 +636,13 @@ with tab5:
                 st.session_state["party_master"] = pd.concat(
                     [st.session_state["party_master"], new_p], ignore_index=True
                 )
-                st.success(f"✅ Party '{new_name}' मास्टर में जुड़ गई!")
+                save_cloud_table(
+                    st.session_state["party_master"], "party_master"
+                )
+                st.success(f"✅ Party '{new_name}' Google Sheet में जुड़ गई!")
 
     with col_m2:
-        st.subheader("💳 Voucher Entry (Payment / Receipt)")
+        st.subheader("💳 Voucher Entry")
         with st.form("voucher_form"):
             v_party = st.selectbox(
                 "Party Name",
@@ -591,14 +676,19 @@ with tab5:
                     ],
                     ignore_index=True,
                 )
-                st.success("✅ वाउचर लेजर में अपडेट हो गया!")
+                save_cloud_table(
+                    st.session_state["ledger_transactions"], "ledger_transactions"
+                )
+                st.success("✅ वाउचर Google Sheet लेजर में सेव हो गया!")
 
     st.markdown("---")
-    st.subheader("👥 Editable Party Master List")
+    st.subheader("👥 Party Master List")
     edited_party_master = st.data_editor(
         st.session_state["party_master"],
         key="party_master_editor",
         num_rows="dynamic",
         use_container_width=True,
     )
-    st.session_state["party_master"] = edited_party_master
+    if not edited_party_master.equals(st.session_state["party_master"]):
+        st.session_state["party_master"] = edited_party_master
+        save_cloud_table(edited_party_master, "party_master")
