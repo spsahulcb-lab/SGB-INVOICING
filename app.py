@@ -1,4 +1,3 @@
-import base64
 from io import BytesIO
 import json
 import google.generativeai as genai
@@ -67,11 +66,40 @@ def save_cloud_table(df, worksheet_name):
         st.error(f"Cloud Save Error: {e}")
 
 
+# ==========================================
+# CACHED MODEL FINDER (0 SEC DELAY & ZERO 404 CRASH)
+# ==========================================
+@st.cache_data(ttl=3600)
+def get_working_gemini_model():
+    """आपकी API Key पर वर्किंग विज़न मॉडल को ऑटोमैटिक ढूँढकर 1 घंटे के लिए कैश करता है"""
+    try:
+        available_models = [
+            m.name
+            for m in genai.list_models()
+            if "generateContent" in m.supported_generation_methods
+        ]
+        priority_models = [
+            "models/gemini-1.5-flash",
+            "models/gemini-1.5-pro",
+            "models/gemini-1.0-pro-vision",
+        ]
+
+        for pm in priority_models:
+            if pm in available_models:
+                return pm
+
+        return available_models[0] if available_models else "gemini-1.5-flash"
+    except Exception:
+        return "gemini-1.5-flash"
+
+
 def scan_bill_with_gemini(uploaded_file):
-    """Gemini AI OCR Engine to Extract Bill / Prescription Data"""
+    """Super-Fast AI OCR Engine"""
     try:
         image = Image.open(uploaded_file)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model_name = get_working_gemini_model()
+        model = genai.GenerativeModel(model_name)
+
         prompt = """
         Extract medicine items from this invoice or prescription photo into a clean JSON list.
         Each item must strictly follow these keys:
@@ -86,19 +114,16 @@ def scan_bill_with_gemini(uploaded_file):
         parsed_data = json.loads(clean_json)
         df_extracted = pd.DataFrame(parsed_data)
 
-        # Force default GST % to 5.0 if missing or zero in extraction
         if "GST %" not in df_extracted.columns:
             df_extracted["GST %"] = 5.0
         else:
             df_extracted["GST %"] = df_extracted["GST %"].apply(
-                lambda x: 5.0 if pd.isna(x) or x == 0 else float(x)
+                lambda x: 5.0 if pd.isna(x) or float(x) == 0 else float(x)
             )
 
         return df_extracted
     except Exception as e:
-        st.error(
-            f"AI Scan Error: {e}. Please ensure valid Gemini API Key is configured."
-        )
+        st.error(f"AI Scan Error: {e}")
         return None
 
 
@@ -196,7 +221,7 @@ def generate_pdf_invoice(party_name, inv_no, date_str, items_df, grand_total):
 
 
 # ==========================================
-# 4. INITIALIZATION & SESSION STATE (DEFAULT 5% GST)
+# 4. INITIALIZATION (DEFAULT GST: 5%)
 # ==========================================
 def get_empty_df():
     return pd.DataFrame(
@@ -208,7 +233,7 @@ def get_empty_df():
                 "Free Deal": 0,
                 "Rate": 0.0,
                 "Disc %": 0.0,
-                "GST %": 5.0,  # Default 5% GST strictly applied
+                "GST %": 5.0,  # Strict Default 5% GST
             }
         ]
     )
@@ -250,7 +275,7 @@ if user_role == "Manager":
     pwd = st.sidebar.text_input("🔐 Manager PIN:", type="password")
 
 # ==========================================
-# 5. APP MODULE NAVIGATION
+# 5. MODULE NAVIGATION
 # ==========================================
 tabs_list = [
     "🧾 Sales Invoice",
@@ -263,7 +288,7 @@ if user_role == "Manager":
 active_tab = st.selectbox("📌 Select Module:", tabs_list)
 
 # ------------------------------------------
-# TAB 1: SALES INVOICE & AI SCANNER
+# TAB 1: SALES INVOICE & FAST AI SCANNER
 # ------------------------------------------
 if active_tab == "🧾 Sales Invoice":
     st.header("🧾 New Sales Bill & PDF Generator")
@@ -281,7 +306,6 @@ if active_tab == "🧾 Sales Invoice":
             "📄 Invoice No.", f"INV-{pd.Timestamp.now().strftime('%d%H%M')}"
         )
 
-    # --- AI OCR SCANNER SECTION ---
     with st.expander("📷 AI Scan Invoice / Prescription Photo", expanded=False):
         uploaded_sales_img = st.file_uploader(
             "Upload Sales Bill or Prescription Image",
@@ -291,11 +315,11 @@ if active_tab == "🧾 Sales Invoice":
         if uploaded_sales_img is not None:
             st.image(uploaded_sales_img, caption="Uploaded Document", width=250)
             if st.button("🔍 Auto Scan & Fill Table"):
-                with st.spinner("AI Bill Analysis in progress..."):
+                with st.spinner("Fast AI Bill Scanning..."):
                     extracted_df = scan_bill_with_gemini(uploaded_sales_img)
                     if extracted_df is not None and not extracted_df.empty:
                         st.session_state["sales_data"] = extracted_df
-                        st.success("✅ Extracted items added with default 5% GST!")
+                        st.success("✅ Items scanned & populated with 5% GST!")
                         st.rerun()
 
     st.subheader("📦 Invoice Line Items (Default GST: 5%)")
@@ -325,7 +349,7 @@ if active_tab == "🧾 Sales Invoice":
                     [sales_hist_df, valid_items], ignore_index=True
                 )
                 save_cloud_table(updated_history, "sales_history")
-                st.success("🎉 Bill saved successfully to Google Sheets!")
+                st.success("🎉 Bill saved to Google Sheets!")
             except Exception as e:
                 st.error(f"Save Error: {e}")
 
@@ -357,7 +381,7 @@ if active_tab == "🧾 Sales Invoice":
             )
 
 # ------------------------------------------
-# TAB 2: PURCHASE ENTRY & AI SCANNER
+# TAB 2: PURCHASE ENTRY & FAST AI SCANNER
 # ------------------------------------------
 elif active_tab == "📦 Purchase Entry":
     st.header("📦 Purchase Inward Entry")
@@ -369,7 +393,6 @@ elif active_tab == "📦 Purchase Entry":
     p_party = st.selectbox("🏭 Supplier Name", supp_list)
     p_inv_no = st.text_input("📄 Bill No.", "PUR-101")
 
-    # --- AI OCR SCANNER FOR PURCHASE ---
     with st.expander("📷 AI Scan Purchase Bill Photo", expanded=False):
         uploaded_pur_img = st.file_uploader(
             "Upload Purchase Invoice Image",
@@ -379,11 +402,11 @@ elif active_tab == "📦 Purchase Entry":
         if uploaded_pur_img is not None:
             st.image(uploaded_pur_img, caption="Purchase Bill Image", width=250)
             if st.button("🔍 Scan Purchase Invoice"):
-                with st.spinner("AI Processing Purchase Bill..."):
+                with st.spinner("Fast AI Processing..."):
                     extracted_p_df = scan_bill_with_gemini(uploaded_pur_img)
                     if extracted_p_df is not None and not extracted_p_df.empty:
                         st.session_state["purchase_data"] = extracted_p_df
-                        st.success("✅ Purchase items populated with default 5% GST!")
+                        st.success("✅ Purchase items populated with 5% GST!")
                         st.rerun()
 
     p_df = st.data_editor(
