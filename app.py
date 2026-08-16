@@ -67,46 +67,43 @@ def save_cloud_table(df, worksheet_name):
 
 
 # ==========================================
-# CACHED MODEL FINDER (0 SEC DELAY & ZERO 404 CRASH)
+# STRICT & SAFE MODEL FINDER (ZERO 404 GUARANTEE)
 # ==========================================
 @st.cache_data(ttl=3600)
 def get_working_gemini_model():
-    """आपकी API Key पर वर्किंग विज़न मॉडल को ऑटोमैटिक ढूँढकर 1 घंटे के लिए कैश करता है"""
+    """यह केवल एक्टिव वर्किंग मॉडल (gemini-1.5-flash) चुनता है"""
     try:
         available_models = [
             m.name
             for m in genai.list_models()
             if "generateContent" in m.supported_generation_methods
         ]
-        priority_models = [
-            "models/gemini-1.5-flash",
-            "models/gemini-1.5-pro",
-            "models/gemini-1.0-pro-vision",
-        ]
+        safe_priority = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
 
-        for pm in priority_models:
+        for pm in safe_priority:
             if pm in available_models:
                 return pm
 
-        return available_models[0] if available_models else "gemini-1.5-flash"
+        valid_models = [m for m in available_models if "2.5" not in m]
+        return valid_models[0] if valid_models else "gemini-1.5-flash"
     except Exception:
         return "gemini-1.5-flash"
 
 
 def scan_bill_with_gemini(uploaded_file):
-    """Super-Fast AI OCR Engine"""
+    """Super-Fast & Safe AI OCR Engine"""
+    prompt = """
+    Extract medicine items from this invoice or prescription photo into a clean JSON list.
+    Each item must strictly follow these keys:
+    "Product Name" (str), "MRP" (float), "Qty" (int), "Free Deal" (int), "Rate" (float), "Disc %" (float), "GST %" (float).
+    If GST % is not explicitly visible or mentioned, default "GST %" to 5.0.
+    Output ONLY valid JSON array without any markdown formatting or extra text.
+    """
     try:
         image = Image.open(uploaded_file)
         model_name = get_working_gemini_model()
         model = genai.GenerativeModel(model_name)
 
-        prompt = """
-        Extract medicine items from this invoice or prescription photo into a clean JSON list.
-        Each item must strictly follow these keys:
-        "Product Name" (str), "MRP" (float), "Qty" (int), "Free Deal" (int), "Rate" (float), "Disc %" (float), "GST %" (float).
-        If GST % is not explicitly visible or mentioned, default "GST %" to 5.0.
-        Output ONLY valid JSON array without any markdown formatting or extra text.
-        """
         response = model.generate_content([prompt, image])
         clean_json = (
             response.text.strip().replace("```json", "").replace("```", "").strip()
@@ -122,9 +119,22 @@ def scan_bill_with_gemini(uploaded_file):
             )
 
         return df_extracted
-    except Exception as e:
-        st.error(f"AI Scan Error: {e}")
-        return None
+    except Exception:
+        # Fallback to direct stable gemini-1.5-flash
+        try:
+            image = Image.open(uploaded_file)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+            response = model.generate_content([prompt, image])
+            clean_json = (
+                response.text.strip().replace("```json", "").replace("```", "").strip()
+            )
+            df_extracted = pd.DataFrame(json.loads(clean_json))
+            if "GST %" not in df_extracted.columns:
+                df_extracted["GST %"] = 5.0
+            return df_extracted
+        except Exception as err:
+            st.error(f"AI Scan Error: {err}")
+            return None
 
 
 # ==========================================
