@@ -1,5 +1,5 @@
-from io import BytesIO
 import json
+from io import BytesIO
 import google.generativeai as genai
 import pandas as pd
 from PIL import Image
@@ -11,7 +11,7 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 
 # ==========================================
-# 1. PAGE SETUP & ORANGE-WHITE THEME
+# 1. PAGE SETUP & THEME STYLING
 # ==========================================
 st.set_page_config(
     page_title="Pharma ERP - Smart Invoicing & Management",
@@ -67,31 +67,9 @@ def save_cloud_table(df, worksheet_name):
 
 
 # ==========================================
-# STRICT & SAFE MODEL FINDER (ZERO 404 GUARANTEE)
+# MULTI-MODEL DYNAMIC FALLBACK OCR ENGINE
 # ==========================================
-@st.cache_data(ttl=3600)
-def get_working_gemini_model():
-    """यह केवल एक्टिव वर्किंग मॉडल (gemini-1.5-flash) चुनता है"""
-    try:
-        available_models = [
-            m.name
-            for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        safe_priority = ["models/gemini-1.5-flash", "models/gemini-1.5-pro"]
-
-        for pm in safe_priority:
-            if pm in available_models:
-                return pm
-
-        valid_models = [m for m in available_models if "2.5" not in m]
-        return valid_models[0] if valid_models else "gemini-1.5-flash"
-    except Exception:
-        return "gemini-1.5-flash"
-
-
 def scan_bill_with_gemini(uploaded_file):
-    """Super-Fast & Safe AI OCR Engine"""
     prompt = """
     Extract medicine items from this invoice or prescription photo into a clean JSON list.
     Each item must strictly follow these keys:
@@ -101,40 +79,53 @@ def scan_bill_with_gemini(uploaded_file):
     """
     try:
         image = Image.open(uploaded_file)
-        model_name = get_working_gemini_model()
-        model = genai.GenerativeModel(model_name)
+        candidate_models = []
 
-        response = model.generate_content([prompt, image])
-        clean_json = (
-            response.text.strip().replace("```json", "").replace("```", "").strip()
-        )
-        parsed_data = json.loads(clean_json)
-        df_extracted = pd.DataFrame(parsed_data)
-
-        if "GST %" not in df_extracted.columns:
-            df_extracted["GST %"] = 5.0
-        else:
-            df_extracted["GST %"] = df_extracted["GST %"].apply(
-                lambda x: 5.0 if pd.isna(x) or float(x) == 0 else float(x)
-            )
-
-        return df_extracted
-    except Exception:
-        # Fallback to direct stable gemini-1.5-flash
+        # API Key ke zariye active models fetch karna
         try:
-            image = Image.open(uploaded_file)
-            model = genai.GenerativeModel("gemini-1.5-flash")
-            response = model.generate_content([prompt, image])
-            clean_json = (
-                response.text.strip().replace("```json", "").replace("```", "").strip()
-            )
-            df_extracted = pd.DataFrame(json.loads(clean_json))
-            if "GST %" not in df_extracted.columns:
-                df_extracted["GST %"] = 5.0
-            return df_extracted
-        except Exception as err:
-            st.error(f"AI Scan Error: {err}")
-            return None
+            for m in genai.list_models():
+                if "generateContent" in m.supported_generation_methods:
+                    clean_name = m.name.replace("models/", "")
+                    candidate_models.append(clean_name)
+        except Exception:
+            pass
+
+        # Fallback candidate models
+        fallback_list = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
+        for fb in fallback_list:
+            if fb not in candidate_models:
+                candidate_models.append(fb)
+
+        last_err = None
+        for model_id in candidate_models:
+            try:
+                model = genai.GenerativeModel(model_id)
+                response = model.generate_content([prompt, image])
+                clean_json = (
+                    response.text.strip()
+                    .replace("```json", "")
+                    .replace("```", "")
+                    .strip()
+                )
+                parsed_data = json.loads(clean_json)
+                df_extracted = pd.DataFrame(parsed_data)
+
+                if "GST %" not in df_extracted.columns:
+                    df_extracted["GST %"] = 5.0
+                else:
+                    df_extracted["GST %"] = df_extracted["GST %"].apply(
+                        lambda x: 5.0 if pd.isna(x) or float(x) == 0 else float(x)
+                    )
+                return df_extracted
+            except Exception as e:
+                last_err = e
+                continue
+
+        st.error(f"AI Scan Error: {last_err}")
+        return None
+    except Exception as err:
+        st.error(f"File Loading Error: {err}")
+        return None
 
 
 # ==========================================
@@ -231,7 +222,7 @@ def generate_pdf_invoice(party_name, inv_no, date_str, items_df, grand_total):
 
 
 # ==========================================
-# 4. INITIALIZATION (DEFAULT GST: 5%)
+# 4. INITIALIZATION & SESSION STATE
 # ==========================================
 def get_empty_df():
     return pd.DataFrame(
@@ -243,7 +234,7 @@ def get_empty_df():
                 "Free Deal": 0,
                 "Rate": 0.0,
                 "Disc %": 0.0,
-                "GST %": 5.0,  # Strict Default 5% GST
+                "GST %": 5.0,
             }
         ]
     )
@@ -285,7 +276,7 @@ if user_role == "Manager":
     pwd = st.sidebar.text_input("🔐 Manager PIN:", type="password")
 
 # ==========================================
-# 5. MODULE NAVIGATION
+# 5. MODULE NAVIGATION & UI
 # ==========================================
 tabs_list = [
     "🧾 Sales Invoice",
@@ -298,7 +289,7 @@ if user_role == "Manager":
 active_tab = st.selectbox("📌 Select Module:", tabs_list)
 
 # ------------------------------------------
-# TAB 1: SALES INVOICE & FAST AI SCANNER
+# TAB 1: SALES INVOICE
 # ------------------------------------------
 if active_tab == "🧾 Sales Invoice":
     st.header("🧾 New Sales Bill & PDF Generator")
@@ -324,7 +315,7 @@ if active_tab == "🧾 Sales Invoice":
         )
         if uploaded_sales_img is not None:
             st.image(uploaded_sales_img, caption="Uploaded Document", width=250)
-            if st.button("🔍 Auto Scan & Fill Table"):
+            if st.button("Auto Scan & Fill Table"):
                 with st.spinner("Fast AI Bill Scanning..."):
                     extracted_df = scan_bill_with_gemini(uploaded_sales_img)
                     if extracted_df is not None and not extracted_df.empty:
@@ -391,7 +382,7 @@ if active_tab == "🧾 Sales Invoice":
             )
 
 # ------------------------------------------
-# TAB 2: PURCHASE ENTRY & FAST AI SCANNER
+# TAB 2: PURCHASE ENTRY
 # ------------------------------------------
 elif active_tab == "📦 Purchase Entry":
     st.header("📦 Purchase Inward Entry")
@@ -467,7 +458,7 @@ elif active_tab == "📊 Live Stock Inventory":
         st.dataframe(stock_df, use_container_width=True)
 
 # ------------------------------------------
-# TAB 4: MANAGER MONITORING DASHBOARD
+# TAB 4: MANAGER MONITORING
 # ------------------------------------------
 elif active_tab == "👑 Manager Monitoring" and user_role == "Manager":
     if pwd == "1234":
