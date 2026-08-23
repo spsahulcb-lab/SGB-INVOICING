@@ -7,37 +7,55 @@ import streamlit as st
 import google.generativeai as genai
 
 # ==========================================
-# 1. LOCAL SQLITE DATABASE SETUP WITH MIGRATION
+# 1. DATABASE SETUP (LOCAL + CLOUD READY)
 # ==========================================
 DB_FILE = "pharma_erp.db"
+
+def get_connection():
+    # If Supabase URL is in secrets, connect to PostgreSQL, else fallback to SQLite
+    if "postgres" in st.secrets:
+        import psycopg2
+        return psycopg2.connect(st.secrets["postgres"]["url"])
+    return sqlite3.connect(DB_FILE)
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS sales_history 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, party_name TEXT, inv_no TEXT, salesman TEXT, date TEXT, product TEXT, hsn TEXT, batch TEXT, exp TEXT, mrp REAL, qty REAL, bonus REAL, rate REAL, disc_per REAL, gst_per REAL, net_amt REAL)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS purchase_history 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, party_name TEXT, inv_no TEXT, salesman TEXT, date TEXT, product TEXT, hsn TEXT, batch TEXT, exp TEXT, mrp REAL, qty REAL, bonus REAL, rate REAL, disc_per REAL, gst_per REAL, net_amt REAL)''')
     
-    for table in ["sales_history", "purchase_history"]:
-        c.execute(f"PRAGMA table_info({table})")
-        existing_cols = [col[1] for col in c.fetchall()]
-        required_cols = {
-            "salesman": "TEXT", "hsn": "TEXT", "batch": "TEXT", "exp": "TEXT", 
-            "mrp": "REAL", "bonus": "REAL", "rate": "REAL", "disc_per": "REAL", 
-            "gst_per": "REAL", "net_amt": "REAL"
-        }
-        for col_name, col_type in required_cols.items():
-            if col_name not in existing_cols:
-                try:
-                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
-                except Exception:
-                    pass
+    # Sales History Table
+    c.execute('''CREATE TABLE IF NOT EXISTS sales_history 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, party_name TEXT, inv_no TEXT, salesman TEXT, date TEXT, 
+                  product TEXT, hsn TEXT, batch TEXT, exp TEXT, mrp REAL, qty REAL, bonus REAL, rate REAL, 
+                  disc_per REAL, gst_per REAL, net_amt REAL)''')
+    
+    # Purchase History Table
+    c.execute('''CREATE TABLE IF NOT EXISTS purchase_history 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, party_name TEXT, inv_no TEXT, salesman TEXT, date TEXT, 
+                  product TEXT, hsn TEXT, batch TEXT, exp TEXT, mrp REAL, qty REAL, bonus REAL, rate REAL, 
+                  disc_per REAL, gst_per REAL, net_amt REAL)''')
+    
+    # Product Inventory Master Table
+    c.execute('''CREATE TABLE IF NOT EXISTS product_master 
+                 (product_name TEXT PRIMARY KEY, hsn TEXT, batch TEXT, exp TEXT, mrp REAL, rate REAL, disc_per REAL, gst_per REAL)''')
 
     conn.commit()
     conn.close()
 
 init_db()
+
+# ==========================================
+# 2. HELPER FUNCTIONS & FORMULAS
+# ==========================================
+def calculate_default_rate(mrp, gst_per):
+    """ Formula: Rate = MRP * 80 / (100 + GST) """
+    try:
+        mrp = float(mrp)
+        gst_per = float(gst_per)
+        if (100 + gst_per) > 0:
+            return round((mrp * 80.0) / (100.0 + gst_per), 2)
+    except Exception:
+        pass
+    return 0.0
 
 def get_existing_customers():
     conn = sqlite3.connect(DB_FILE)
@@ -55,11 +73,11 @@ def get_existing_suppliers():
 
 def get_available_batch_products():
     conn = sqlite3.connect(DB_FILE)
-    p_df = pd.read_sql_query("SELECT DISTINCT product, hsn, batch, exp, mrp, rate FROM purchase_history", conn)
-    s_df = pd.read_sql_query("SELECT DISTINCT product, hsn, batch, exp, mrp, rate FROM sales_history", conn)
+    p_df = pd.read_sql_query("SELECT DISTINCT product, hsn, batch, exp, mrp, rate, disc_per, gst_per FROM purchase_history", conn)
+    s_df = pd.read_sql_query("SELECT DISTINCT product, hsn, batch, exp, mrp, rate, disc_per, gst_per FROM sales_history", conn)
     conn.close()
     
-    df = pd.concat([p_df, s_df]).drop_duplicates(subset=["product", "batch"])
+    df = pd.concat([p_df, s_df]).drop_duplicates(subset=["product", "batch"], keep="last")
     
     batch_map = {}
     options_list = [""]
@@ -71,21 +89,27 @@ def get_available_batch_products():
             mrp = float(row["mrp"]) if row["mrp"] else 0.0
             hsn = str(row["hsn"]).strip() if row["hsn"] else "3004"
             exp = str(row["exp"]).strip() if row["exp"] else ""
-            rate = float(row["rate"]) if row["rate"] else 0.0
+            gst_per = float(row["gst_per"]) if row["gst_per"] else 5.0
+            disc_per = float(row["disc_per"]) if row["disc_per"] else 0.0
+            
+            # Rate via formula or recorded rate
+            rate = calculate_default_rate(mrp, gst_per) if mrp > 0 else (float(row["rate"]) if row["rate"] else 0.0)
             
             if p_name:
                 display_label = f"{p_name} | BATCH: {batch} | MRP: ₹{mrp}" if batch else p_name
                 options_list.append(display_label)
                 batch_map[display_label] = {
-                    "product_name": p_name, "hsn": hsn, "batch": batch, "exp": exp, "mrp": mrp, "rate": rate
+                    "product_name": p_name, "hsn": hsn, "batch": batch, "exp": exp, 
+                    "mrp": mrp, "rate": rate, "disc_per": disc_per, "gst_per": gst_per
                 }
 
     defaults = [
-        {"product_name": "GASMIT-DSR CAPS 1x10", "hsn": "3004", "batch": "WEB/05/063D", "exp": "04-28", "mrp": 109.00, "rate": 80.25},
-        {"product_name": "PANEC-P TAB 1x10", "hsn": "3004", "batch": "D6DT031", "exp": "03-28", "mrp": 56.00, "rate": 44.80},
-        {"product_name": "ALOBYD-SP TAB", "hsn": "3004", "batch": "AB-102", "exp": "12-27", "mrp": 95.00, "rate": 72.38}
+        {"product_name": "GASMIT-DSR CAPS 1x10", "hsn": "3004", "batch": "WEB/05/063D", "exp": "04-28", "mrp": 109.00, "gst_per": 5.0, "disc_per": 0.0},
+        {"product_name": "PANEC-P TAB 1x10", "hsn": "3004", "batch": "D6DT031", "exp": "03-28", "mrp": 56.00, "gst_per": 5.0, "disc_per": 0.0},
+        {"product_name": "ALOBYD-SP TAB", "hsn": "3004", "batch": "AB-102", "exp": "12-27", "mrp": 95.00, "gst_per": 5.0, "disc_per": 0.0}
     ]
     for item in defaults:
+        item["rate"] = calculate_default_rate(item["mrp"], item["gst_per"])
         label = f"{item['product_name']} | BATCH: {item['batch']} | MRP: ₹{item['mrp']}"
         if label not in options_list:
             options_list.append(label)
@@ -156,7 +180,6 @@ def calculate_live_stock():
 
     stock_df = pd.merge(p_tot, s_tot, on=["product", "batch"], how="outer").fillna(0)
     stock_df["Available Stock"] = stock_df["Purchased Qty"] - stock_df["Sold Qty"]
-    
     stock_df.rename(columns={"product": "Product Name", "batch": "Batch"}, inplace=True)
     return stock_df
 
@@ -169,6 +192,11 @@ def safe_calculate_bill(df):
         else:
             calc_df[c] = 5.0 if c == "Gst%" else 0.0
 
+    # Apply Auto Rate Calculation if Rate is 0
+    for idx, r in calc_df.iterrows():
+        if r["RATE"] == 0.0 and r["MRP"] > 0:
+            calc_df.at[idx, "RATE"] = calculate_default_rate(r["MRP"], r["Gst%"])
+
     calc_df["Gross"] = calc_df["QTY"] * calc_df["RATE"]
     calc_df["Disc_Amt"] = (calc_df["Gross"] * calc_df["DIS %"]) / 100.0
     calc_df["Taxable"] = calc_df["Gross"] - calc_df["Disc_Amt"]
@@ -177,76 +205,27 @@ def safe_calculate_bill(df):
     return calc_df
 
 # ==========================================
-# 2. APP CONFIG & ORANGE-WHITE THEME (CSS)
+# 3. APP CONFIG & THEME
 # ==========================================
-st.set_page_config(
-    page_title="Pharma ERP - Orange Theme", 
-    layout="wide", 
-    page_icon="💊",
-    initial_sidebar_state="collapsed"
-)
+st.set_page_config(page_title="Pharma ERP - Orange Theme", layout="wide", page_icon="💊")
 
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #FFFFFF;
-        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    }
-    
-    header[data-testid="stHeader"] {
-        background: linear-gradient(90deg, #FF6F00, #FF8F00) !important;
-    }
-
-    section[data-testid="stSidebar"] {
-        background-color: #FFF3E0 !important;
-        border-right: 2px solid #FFE0B2;
-    }
-
+    .stApp { background-color: #FFFFFF; font-family: 'Segoe UI', Tahoma, Geneva, sans-serif; }
+    header[data-testid="stHeader"] { background: linear-gradient(90deg, #FF6F00, #FF8F00) !important; }
+    section[data-testid="stSidebar"] { background-color: #FFF3E0 !important; border-right: 2px solid #FFE0B2; }
     .stButton>button, div[data-baseweb="button"] {
-        width: 100% !important;
-        background: #FF6F00 !important;
-        color: white !important;
-        font-weight: bold !important;
-        font-size: 16px !important;
-        padding: 10px 16px !important;
-        border-radius: 8px !important;
-        border: none !important;
-        box-shadow: 0 4px 6px rgba(255, 111, 0, 0.2);
+        width: 100% !important; background: #FF6F00 !important; color: white !important;
+        font-weight: bold !important; font-size: 16px !important; padding: 10px 16px !important;
+        border-radius: 8px !important; border: none !important;
     }
-    .stButton>button:hover {
-        background: #E65100 !important;
-    }
-
+    .stButton>button:hover { background: #E65100 !important; }
     div[data-testid="stMetric"] {
-        background-color: #FFFFFF !important;
-        padding: 15px !important;
-        border-radius: 10px !important;
-        border: 1px solid #FFE0B2 !important;
+        background-color: #FFFFFF !important; padding: 15px !important;
+        border-radius: 10px !important; border: 1px solid #FFE0B2 !important;
         border-left: 6px solid #FF6F00 !important;
-        box-shadow: 0px 2px 8px rgba(0,0,0,0.05) !important;
     }
-    
-    div[data-testid="stMetricLabel"] {
-        color: #E65100 !important;
-        font-weight: bold;
-    }
-
-    input:focus, select:focus {
-        border-color: #FF6F00 !important;
-        box-shadow: 0 0 5px rgba(255, 111, 0, 0.5) !important;
-    }
-
-    a[href*="whatsapp.com"] {
-        display: block;
-        text-align: center;
-        background-color: #25D366 !important;
-        color: white !important;
-        font-weight: bold;
-        padding: 10px;
-        border-radius: 8px;
-        text-decoration: none;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    }
+    div[data-testid="stMetricLabel"] { color: #E65100 !important; font-weight: bold; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -262,13 +241,28 @@ def process_bill_with_ai(image):
     return json.loads(clean_json)
 
 # ==========================================
-# 3. SIDEBAR NAVIGATION
+# 4. USER ROLE & AUTHENTICATION SIDEBAR
 # ==========================================
-st.sidebar.title("💊 Pharma ERP Menu")
-user_role = st.sidebar.radio("👤 Choose Role:", ["Sales Executive", "Manager"])
-user_name = st.sidebar.text_input("✍️ Enter Your Name:", value="Rahul")
+st.sidebar.title("💊 Pharma ERP System")
 
-active_tab = st.selectbox("📌 Select Module:", [
+user_role = st.sidebar.radio("👤 Select Role:", ["Salesman", "Manager"])
+
+if user_role == "Manager":
+    mgr_password = st.sidebar.text_input("🔑 Manager Password:", type="password")
+    if mgr_password != "admin123":
+        st.sidebar.warning("⚠️ Enter valid Manager password to unlock full controls.")
+        is_manager = False
+    else:
+        st.sidebar.success("✅ Manager Access Granted")
+        is_manager = True
+    user_name = st.sidebar.text_input("✍️ Manager Name:", value="Manager")
+else:
+    is_manager = False
+    salesman_options = ["salesman1", "salesman2", "salesman3", "Rahul", "Satya"]
+    user_name = st.sidebar.selectbox("✍️ Select Salesman Account:", salesman_options)
+
+st.sidebar.markdown("---")
+active_tab = st.sidebar.selectbox("📌 Select Module:", [
     "🧾 Sales Invoice (Format)", 
     "📷 AI Bill Scanner", 
     "📦 Purchase Entry", 
@@ -309,7 +303,8 @@ if active_tab == "🧾 Sales Invoice (Format)":
         with col_inputs[1]:
             input_bonus = st.number_input("Deal / Bonus", min_value=0.0, value=0.0, step=1.0)
         with col_inputs[2]:
-            input_disc = st.number_input("DIS % (छूट)", min_value=0.0, value=0.0, step=0.5)
+            default_disc = selected_details.get("disc_per", 0.0)
+            input_disc = st.number_input("DIS % (छूट)", min_value=0.0, value=default_disc, step=0.5)
         with col_inputs[3]:
             st.write(" ")
             st.write(" ")
@@ -317,17 +312,23 @@ if active_tab == "🧾 Sales Invoice (Format)":
 
         if submit_button:
             if selected_prod_label and input_qty > 0:
+                mrp_val = selected_details.get("mrp", 0.0)
+                gst_val = selected_details.get("gst_per", 5.0)
+                
+                # Auto Calculate Rate: Rate = MRP * 80 / (100 + GST)
+                calculated_rate = calculate_default_rate(mrp_val, gst_val) if mrp_val > 0 else selected_details.get("rate", 0.0)
+
                 st.session_state["sales_cart"].append({
                     "HSN": selected_details.get("hsn", "3004"),
                     "PRODUCT": selected_details.get("product_name", ""),
                     "QTY": input_qty,
                     "BONUS": input_bonus,
-                    "RATE": selected_details.get("rate", 0.0),
+                    "RATE": calculated_rate,
                     "DIS %": input_disc,
-                    "Gst%": 5.0,
+                    "Gst%": gst_val,
                     "BATCH": selected_details.get("batch", ""),
                     "EXP": selected_details.get("exp", ""),
-                    "MRP": selected_details.get("mrp", 0.0)
+                    "MRP": mrp_val
                 })
                 st.success(f"Added {selected_details.get('product_name')}")
                 st.rerun()
@@ -341,10 +342,7 @@ if active_tab == "🧾 Sales Invoice (Format)":
     else:
         cart_df = pd.DataFrame(st.session_state["sales_cart"])
 
-    # num_rows="dynamic" allows row deletion via checkbox/selection
     edited_sales = st.data_editor(cart_df, num_rows="dynamic", use_container_width=True, key="sales_data_editor")
-    
-    # Sync edited data back to cart
     st.session_state["sales_cart"] = edited_sales.to_dict("records")
     
     calc_sales_df = safe_calculate_bill(edited_sales)
@@ -507,7 +505,7 @@ elif active_tab == "📦 Live Stock Inventory":
         st.dataframe(stock_df, use_container_width=True)
 
 # ------------------------------------------
-# MODULE 5: REPORTS & STATEMENTS
+# MODULE 5: REPORTS & MANAGER VIEW
 # ------------------------------------------
 elif active_tab == "📊 Reports & Statements":
     st.markdown("<h2 style='color: #E65100;'>📊 Statements & Reports</h2>", unsafe_allow_html=True)
@@ -521,22 +519,32 @@ elif active_tab == "📊 Reports & Statements":
         if s_df.empty:
             st.info("कोई सेल रिकॉर्ड उपलब्ध नहीं है।")
         else:
-            s_customers = ["ALL Customers"] + sorted(s_df["party_name"].unique().tolist())
-            selected_cust = st.selectbox("👤 Filter Sales by Customer:", options=s_customers, key="sales_cust_filter")
+            col_f1, col_f2 = st.columns(2)
+            
+            # Manager Filter by Salesman
+            with col_f1:
+                if user_role == "Manager" and is_manager:
+                    all_salesmen = ["ALL Salesmen"] + sorted(s_df["salesman"].dropna().unique().tolist())
+                    selected_sm = st.selectbox("👨‍💼 Manager Filter: Select Salesman", all_salesmen)
+                    if selected_sm != "ALL Salesmen":
+                        s_df = s_df[s_df["salesman"] == selected_sm]
+                elif user_role == "Salesman":
+                    s_df = s_df[s_df["salesman"] == user_name]
 
-            filtered_sales = s_df if selected_cust == "ALL Customers" else s_df[s_df["party_name"] == selected_cust]
+            with col_f2:
+                s_customers = ["ALL Customers"] + sorted(s_df["party_name"].dropna().unique().tolist())
+                selected_cust = st.selectbox("👤 Filter Sales by Customer:", options=s_customers)
+                if selected_cust != "ALL Customers":
+                    s_df = s_df[s_df["party_name"] == selected_cust]
 
-            sales_summary = filtered_sales.groupby(["inv_no", "date", "party_name"]).agg(
+            sales_summary = s_df.groupby(["inv_no", "date", "party_name", "salesman"]).agg(
                 Sales_Value=("net_amt", "sum"),
                 Total_Items=("product", "count")
             ).reset_index()
 
             sales_summary.rename(columns={
-                "inv_no": "Sales Invoice No",
-                "date": "Date",
-                "party_name": "Party Name",
-                "Sales_Value": "Sales Value (₹)",
-                "Total_Items": "Total Items"
+                "inv_no": "Sales Invoice No", "date": "Date", "party_name": "Party Name",
+                "salesman": "Salesman", "Sales_Value": "Sales Value (₹)", "Total_Items": "Total Items"
             }, inplace=True)
 
             m1, m2 = st.columns(2)
@@ -546,8 +554,16 @@ elif active_tab == "📊 Reports & Statements":
             st.dataframe(sales_summary, use_container_width=True)
 
             st.markdown("---")
-            if st.checkbox("🔍 Show Full Detailed Sales Log"):
-                st.dataframe(filtered_sales, use_container_width=True)
+            if is_manager:
+                st.subheader("🛠️ Manager Control: Editable Detailed Sales Data")
+                edited_sales_db = st.data_editor(s_df, num_rows="dynamic", use_container_width=True, key="mgr_sales_edit")
+                if st.button("💾 Save Manager Changes"):
+                    conn = sqlite3.connect(DB_FILE)
+                    edited_sales_db.to_sql("sales_history", conn, if_exists="replace", index=False)
+                    conn.close()
+                    st.success("✅ Changes updated in Database!")
+            elif st.checkbox("🔍 Show Detailed Sales Log"):
+                st.dataframe(s_df, use_container_width=True)
 
     with tab_purchase:
         st.subheader("🛒 Purchase Summary Statement")
@@ -556,22 +572,18 @@ elif active_tab == "📊 Reports & Statements":
         if p_df.empty:
             st.info("कोई पर्चेज़ रिकॉर्ड उपलब्ध नहीं है।")
         else:
-            p_suppliers = ["ALL Suppliers"] + sorted(p_df["party_name"].unique().tolist())
-            selected_sup = st.selectbox("🏬 Filter Purchase by Supplier:", options=p_suppliers, key="purchase_sup_filter")
+            p_suppliers = ["ALL Suppliers"] + sorted(p_df["party_name"].dropna().unique().tolist())
+            selected_sup = st.selectbox("🏬 Filter Purchase by Supplier:", options=p_suppliers)
 
             filtered_purchase = p_df if selected_sup == "ALL Suppliers" else p_df[p_df["party_name"] == selected_sup]
 
             purchase_summary = filtered_purchase.groupby(["inv_no", "date", "party_name"]).agg(
-                Purchase_Value=("net_amt", "sum"),
-                Total_Items=("product", "count")
+                Purchase_Value=("net_amt", "sum"), Total_Items=("product", "count")
             ).reset_index()
 
             purchase_summary.rename(columns={
-                "inv_no": "Purchase Invoice No",
-                "date": "Date",
-                "party_name": "Supplier / Party Name",
-                "Purchase_Value": "Purchase Value (₹)",
-                "Total_Items": "Total Items"
+                "inv_no": "Purchase Invoice No", "date": "Date", "party_name": "Supplier Name",
+                "Purchase_Value": "Purchase Value (₹)", "Total_Items": "Total Items"
             }, inplace=True)
 
             pm1, pm2 = st.columns(2)
@@ -579,7 +591,3 @@ elif active_tab == "📊 Reports & Statements":
             pm2.metric("Total Purchase Value", f"₹{purchase_summary['Purchase Value (₹)'].sum():,.2f}")
 
             st.dataframe(purchase_summary, use_container_width=True)
-
-            st.markdown("---")
-            if st.checkbox("🔍 Show Full Detailed Purchase Log"):
-                st.dataframe(filtered_purchase, use_container_width=True)
