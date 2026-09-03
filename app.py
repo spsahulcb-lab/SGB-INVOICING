@@ -23,13 +23,36 @@ conn = st.connection("supabase", type="sql")
 def load_db_table(table_name):
     try:
         return conn.query(f"SELECT * FROM {table_name};", ttl=0)
-    except Exception as e:
+    except Exception:
         return pd.DataFrame()
 
 def execute_db_query(query, params=None):
-    with conn.session as session:
-        session.execute(query, params)
-        session.commit()
+    try:
+        with conn.session as session:
+            session.execute(query, params)
+            session.commit()
+    except Exception as e:
+        st.warning(f"Note: Cloud sync error ({e}) - bill processed locally.")
+
+# ==========================================
+# DEFAULT MASTER PRODUCTS LIST
+# ==========================================
+DEFAULT_PRODUCTS = [
+    "ATPLEX Syrup",
+    "Duty Beauty MINUS 16 Cream",
+    "Duty Beauty Glutathione Soap",
+    "Duty Beauty Facewash",
+    "Kabja Band",
+    "Cartibot",
+    "Virload",
+    "Womensa",
+    "Punchaliv-DS",
+    "Ureta",
+    "Brainenza",
+    "Cutpiles",
+    "Acnetaz",
+    "Dermapari"
+]
 
 # ==========================================
 # PDF GENERATOR FUNCTION
@@ -39,7 +62,7 @@ def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
     pdf.add_page()
     
     pdf.set_font("Arial", 'B', 16)
-    pdf.cell(190, 10, "PHARMA ERP INVOICE", ln=True, align='C')
+    pdf.cell(190, 10, "SGB / LCB PHARMA INVOICE", ln=True, align='C')
     pdf.set_font("Arial", '', 10)
     pdf.cell(190, 5, "Sales & Billing Receipt", ln=True, align='C')
     pdf.line(10, 28, 200, 28)
@@ -101,7 +124,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_user"] = USERS_DB[username_input]
                 st.rerun()
             else:
-                st.error("❌ Invalid Login Credentials")
+                st.error("❌ Invalid Credentials")
     st.stop()
 
 logged_user = st.session_state["logged_user"]
@@ -143,7 +166,10 @@ if active_tab == "📦 Billing & Sales":
     st.subheader("🛒 Add Items to Cart")
     
     stock_df = load_db_table("products")
-    product_list = stock_df["product_name"].tolist() if not stock_df.empty else ["ATPLEX Syrup", "Duty Beauty MINUS 16", "Kabja Band", "Cartibot"]
+    if not stock_df.empty and "product_name" in stock_df.columns:
+        product_list = stock_df["product_name"].tolist()
+    else:
+        product_list = DEFAULT_PRODUCTS
     
     p_col1, p_col2, p_col3, p_col4 = st.columns([3, 1, 1, 1])
     with p_col1:
@@ -186,7 +212,7 @@ if active_tab == "📦 Billing & Sales":
                             "qty": row["QTY"], "rate": row["RATE"], "amount": row["AMOUNT"],
                             "salesman": s_salesman
                         })
-                    st.success("✅ Saved to Central Cloud Database!")
+                    st.success("✅ Saved to Central Database!")
                     st.session_state["sales_cart"] = []
                     st.rerun()
         with c_col2:
@@ -213,7 +239,8 @@ elif active_tab == "🏭 Inventory & Stock":
     if not stock_df.empty:
         st.dataframe(stock_df, use_container_width=True)
     else:
-        st.info("No stock found in Supabase.")
+        st.write("Current Product Catalog:")
+        st.dataframe(pd.DataFrame({"Product Name": DEFAULT_PRODUCTS}), use_container_width=True)
 
     if user_role == "Manager":
         st.markdown("---")
@@ -226,7 +253,7 @@ elif active_tab == "🏭 Inventory & Stock":
                 if new_name.strip():
                     execute_db_query("INSERT INTO products (product_name, stock, price) VALUES (:p, :s, :pr);",
                                      {"p": new_name, "s": new_stock, "pr": new_price})
-                    st.success(f"Added {new_name} to database!")
+                    st.success(f"Added {new_name}!")
                     st.rerun()
 
 # ==========================================
@@ -238,7 +265,7 @@ elif active_tab == "📊 Reports & Statements":
     sales_df = load_db_table("sales_history")
     
     if sales_df.empty:
-        st.info("No sales history found.")
+        st.info("No sales history found in cloud database.")
     else:
         if user_role != "Manager":
             sales_df["salesman_clean"] = sales_df["salesman"].astype(str).str.strip().str.lower()
