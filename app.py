@@ -16,7 +16,27 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SUPABASE DATABASE CONNECTION
+# HARDCODED MASTER PRODUCTS CATALOG
+# ==========================================
+DEFAULT_PRODUCTS = [
+    "ATPLEX Syrup",
+    "Duty Beauty MINUS 16 Cream",
+    "Duty Beauty Glutathione Soap",
+    "Duty Beauty Facewash",
+    "Kabja Band",
+    "Cartibot",
+    "Virload",
+    "Womensa",
+    "Punchaliv-DS",
+    "Ureta",
+    "Brainenza",
+    "Cutpiles",
+    "Acnetaz",
+    "Dermapari"
+]
+
+# ==========================================
+# DATABASE CONNECTION (SUPABASE)
 # ==========================================
 try:
     conn = st.connection("supabase", type="sql")
@@ -41,27 +61,7 @@ def execute_db_query(query, params=None):
             pass
 
 # ==========================================
-# HARDCODED MASTER PRODUCTS CATALOG
-# ==========================================
-DEFAULT_PRODUCTS = [
-    "ATPLEX Syrup",
-    "Duty Beauty MINUS 16 Cream",
-    "Duty Beauty Glutathione Soap",
-    "Duty Beauty Facewash",
-    "Kabja Band",
-    "Cartibot",
-    "Virload",
-    "Womensa",
-    "Punchaliv-DS",
-    "Ureta",
-    "Brainenza",
-    "Cutpiles",
-    "Acnetaz",
-    "Dermapari"
-]
-
-# ==========================================
-# PDF GENERATOR
+# PDF GENERATOR FUNCTION
 # ==========================================
 def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
     pdf = FPDF()
@@ -101,7 +101,7 @@ def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
     return bytes(pdf.output())
 
 # ==========================================
-# LOGIN & USERS
+# AUTHENTICATION & LOGIN
 # ==========================================
 USERS_DB = {
     "manager": {"password": "admin123", "role": "Manager", "name": "Manager"},
@@ -236,9 +236,7 @@ if active_tab == "📦 Billing & Sales":
 # ==========================================
 elif active_tab == "🏭 Inventory & Stock":
     st.markdown("<h2 style='color: #2E7D32;'>🏭 Inventory Management</h2>", unsafe_allow_html=True)
-    
     stock_df = load_db_table("products")
-    st.subheader("📌 Live Product Stock")
     if not stock_df.empty:
         st.dataframe(stock_df, use_container_width=True)
     else:
