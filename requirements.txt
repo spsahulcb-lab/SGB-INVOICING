@@ -1,4 +1,7 @@
 streamlit
-pandas
+fpdf2
 pillow
 google-generativeai
+psycopg2-binary
+sqlalchemy
+pandas
