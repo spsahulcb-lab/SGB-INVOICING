@@ -18,24 +18,30 @@ st.markdown("""
 # ==========================================
 # SUPABASE DATABASE CONNECTION
 # ==========================================
-conn = st.connection("supabase", type="sql")
+try:
+    conn = st.connection("supabase", type="sql")
+except Exception:
+    conn = None
 
 def load_db_table(table_name):
-    try:
-        return conn.query(f"SELECT * FROM {table_name};", ttl=0)
-    except Exception:
-        return pd.DataFrame()
+    if conn:
+        try:
+            return conn.query(f"SELECT * FROM {table_name};", ttl=0)
+        except Exception:
+            return pd.DataFrame()
+    return pd.DataFrame()
 
 def execute_db_query(query, params=None):
-    try:
-        with conn.session as session:
-            session.execute(query, params)
-            session.commit()
-    except Exception as e:
-        st.warning(f"Note: Cloud sync error ({e}) - bill processed locally.")
+    if conn:
+        try:
+            with conn.session as session:
+                session.execute(query, params)
+                session.commit()
+        except Exception:
+            pass
 
 # ==========================================
-# DEFAULT MASTER PRODUCTS LIST
+# HARDCODED MASTER PRODUCTS CATALOG
 # ==========================================
 DEFAULT_PRODUCTS = [
     "ATPLEX Syrup",
@@ -55,12 +61,11 @@ DEFAULT_PRODUCTS = [
 ]
 
 # ==========================================
-# PDF GENERATOR FUNCTION
+# PDF GENERATOR
 # ==========================================
 def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
     pdf = FPDF()
     pdf.add_page()
-    
     pdf.set_font("Arial", 'B', 16)
     pdf.cell(190, 10, "SGB / LCB PHARMA INVOICE", ln=True, align='C')
     pdf.set_font("Arial", '', 10)
@@ -93,17 +98,15 @@ def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(150, 8, "Total Payable Amount:", border=1, align='R')
     pdf.cell(40, 8, f"INR {total_amt:.2f}", border=1, align='R')
-    
     return bytes(pdf.output())
 
 # ==========================================
-# AUTHENTICATION & LOGIN
+# LOGIN & USERS
 # ==========================================
 USERS_DB = {
     "manager": {"password": "admin123", "role": "Manager", "name": "Manager"},
     "rahul": {"password": "rahul123", "role": "Sales Executive", "name": "Rahul"},
-    "satya": {"password": "satya123", "role": "Sales Executive", "name": "Satya"},
-    "sales1": {"password": "sales123", "role": "Sales Executive", "name": "Sales1"}
+    "satya": {"password": "satya123", "role": "Sales Executive", "name": "Satya"}
 }
 
 if "logged_in" not in st.session_state:
@@ -113,7 +116,7 @@ if "sales_cart" not in st.session_state:
     st.session_state["sales_cart"] = []
 
 if not st.session_state["logged_in"]:
-    st.markdown("<h2 class='main-header'>🏢 Pharma ERP Management System</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 class='main-header'>🏢 SGB / LCB Pharma ERP</h2>", unsafe_allow_html=True)
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         username_input = st.text_input("Username").strip().lower()
@@ -239,44 +242,15 @@ elif active_tab == "🏭 Inventory & Stock":
     if not stock_df.empty:
         st.dataframe(stock_df, use_container_width=True)
     else:
-        st.write("Current Product Catalog:")
         st.dataframe(pd.DataFrame({"Product Name": DEFAULT_PRODUCTS}), use_container_width=True)
-
-    if user_role == "Manager":
-        st.markdown("---")
-        st.subheader("➕ Add New Product to Database")
-        with st.form("add_prod_form"):
-            new_name = st.text_input("Product Name")
-            new_stock = st.number_input("Initial Stock", min_value=0, value=100)
-            new_price = st.number_input("Price (₹)", min_value=0.0, value=100.0)
-            if st.form_submit_button("Add Product"):
-                if new_name.strip():
-                    execute_db_query("INSERT INTO products (product_name, stock, price) VALUES (:p, :s, :pr);",
-                                     {"p": new_name, "s": new_stock, "pr": new_price})
-                    st.success(f"Added {new_name}!")
-                    st.rerun()
 
 # ==========================================
 # MODULE 3: REPORTS & STATEMENTS
 # ==========================================
 elif active_tab == "📊 Reports & Statements":
     st.markdown("<h2 style='color: #E65100;'>📊 Reports & Sales History</h2>", unsafe_allow_html=True)
-    
     sales_df = load_db_table("sales_history")
-    
     if sales_df.empty:
-        st.info("No sales history found in cloud database.")
+        st.info("No sales history recorded yet.")
     else:
-        if user_role != "Manager":
-            sales_df["salesman_clean"] = sales_df["salesman"].astype(str).str.strip().str.lower()
-            sales_df = sales_df[sales_df["salesman_clean"] == str(logged_user_name).strip().lower()]
-            sales_df = sales_df.drop(columns=["salesman_clean"])
-
         st.dataframe(sales_df, use_container_width=True)
-
-        if not sales_df.empty:
-            st.markdown("---")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Total Bills Generated", len(sales_df["invoice_no"].unique()))
-            m2.metric("Total Units Sold", int(sales_df["qty"].sum()))
-            m3.metric("Total Revenue Collected", f"₹ {sales_df['total_amount'].sum():,.2f}")
