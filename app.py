@@ -1,11 +1,13 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+from fpdf import FPDF
+import io
 
 # ==========================================
 # PAGE CONFIG & STYLING
 # ==========================================
-st.set_page_config(page_title="Pharma ERP System", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SGB / LCB Pharma ERP", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -15,7 +17,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SUPABASE CONNECTION
+# SUPABASE DATABASE CONNECTION
 # ==========================================
 conn = st.connection("supabase", type="sql")
 
@@ -31,7 +33,54 @@ def execute_db_query(query, params=None):
         session.commit()
 
 # ==========================================
-# AUTHENTICATION
+# PDF GENERATOR FUNCTION
+# ==========================================
+def generate_pdf_invoice(party, inv_no, cart_items, total_amt, salesman):
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Header
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(190, 10, "PHARMA ERP INVOICE", ln=True, align='C')
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(190, 5, "Sales & Billing Receipt", ln=True, align='C')
+    pdf.line(10, 28, 200, 28)
+    pdf.ln(10)
+    
+    # Bill Details
+    pdf.set_font("Arial", 'B', 10)
+    pdf.cell(100, 6, f"Invoice No: {inv_no}", ln=False)
+    pdf.cell(90, 6, f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True)
+    pdf.cell(100, 6, f"Party Name: {party}", ln=False)
+    pdf.cell(90, 6, f"Salesman: {salesman}", ln=True)
+    pdf.ln(6)
+    
+    # Table Header
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(80, 8, "Product Name", border=1, fill=True)
+    pdf.cell(30, 8, "Qty", border=1, align='C', fill=True)
+    pdf.cell(40, 8, "Rate (INR)", border=1, align='R', fill=True)
+    pdf.cell(40, 8, "Amount (INR)", border=1, align='R', fill=True)
+    pdf.ln()
+    
+    # Table Rows
+    pdf.set_font("Arial", '', 10)
+    for item in cart_items:
+        pdf.cell(80, 7, str(item['PRODUCT']), border=1)
+        pdf.cell(30, 7, str(item['QTY']), border=1, align='C')
+        pdf.cell(40, 7, f"{item['RATE']:.2f}", border=1, align='R')
+        pdf.cell(40, 7, f"{item['AMOUNT']:.2f}", border=1, align='R')
+        pdf.ln()
+        
+    # Total
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(150, 8, "Total Payable Amount:", border=1, align='R')
+    pdf.cell(40, 8, f"INR {total_amt:.2f}", border=1, align='R')
+    
+    return bytes(pdf.output())
+
+# ==========================================
+# AUTHENTICATION & LOGIN
 # ==========================================
 USERS_DB = {
     "manager": {"password": "admin123", "role": "Manager", "name": "Manager"},
@@ -58,7 +107,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_user"] = USERS_DB[username_input]
                 st.rerun()
             else:
-                st.error("❌ Invalid Login")
+                st.error("❌ Invalid Login Credentials")
     st.stop()
 
 logged_user = st.session_state["logged_user"]
@@ -100,7 +149,7 @@ if active_tab == "📦 Billing & Sales":
     st.subheader("🛒 Add Items to Cart")
     
     stock_df = load_db_table("products")
-    product_list = stock_df["product_name"].tolist() if not stock_df.empty else ["ATPLEX Syrup", "Duty Beauty Cream", "Kabja Band"]
+    product_list = stock_df["product_name"].tolist() if not stock_df.empty else ["ATPLEX Syrup", "Duty Beauty MINUS 16", "Kabja Band", "Cartibot"]
     
     p_col1, p_col2, p_col3, p_col4 = st.columns([3, 1, 1, 1])
     with p_col1:
@@ -108,7 +157,7 @@ if active_tab == "📦 Billing & Sales":
     with p_col2:
         prod_qty = st.number_input("Qty", min_value=1, value=1)
     with p_col3:
-        prod_rate = st.number_input("Rate (₹)", min_value=0.0, value=100.0)
+        prod_rate = st.number_input("Rate (₹)", min_value=0.0, value=120.0)
     with p_col4:
         st.write("")
         st.write("")
@@ -127,7 +176,7 @@ if active_tab == "📦 Billing & Sales":
         total_bill = cart_df["AMOUNT"].sum()
         st.markdown(f"### 💰 **Total Amount: ₹ {total_bill:,.2f}**")
 
-        c_col1, c_col2 = st.columns(2)
+        c_col1, c_col2, c_col3 = st.columns(3)
         with c_col1:
             if st.button("💾 Save Bill to Supabase"):
                 if not s_party.strip():
@@ -143,10 +192,18 @@ if active_tab == "📦 Billing & Sales":
                             "qty": row["QTY"], "rate": row["RATE"], "amount": row["AMOUNT"],
                             "salesman": s_salesman
                         })
-                    st.success("✅ Saved to Live Supabase Server!")
+                    st.success("✅ Saved to Central Cloud Database!")
                     st.session_state["sales_cart"] = []
                     st.rerun()
         with c_col2:
+            pdf_data = generate_pdf_invoice(s_party, s_inv_no, st.session_state["sales_cart"], total_bill, s_salesman)
+            st.download_button(
+                label="📄 Download PDF Invoice",
+                data=pdf_data,
+                file_name=f"{s_inv_no}.pdf",
+                mime="application/pdf"
+            )
+        with c_col3:
             if st.button("🗑️ Clear Cart"):
                 st.session_state["sales_cart"] = []
                 st.rerun()
@@ -175,7 +232,7 @@ elif active_tab == "🏭 Inventory & Stock":
                 if new_name.strip():
                     execute_db_query("INSERT INTO products (product_name, stock, price) VALUES (:p, :s, :pr);",
                                      {"p": new_name, "s": new_stock, "pr": new_price})
-                    st.success(f"Added {new_name}!")
+                    st.success(f"Added {new_name} to database!")
                     st.rerun()
 
 # ==========================================
@@ -189,6 +246,7 @@ elif active_tab == "📊 Reports & Statements":
     if sales_df.empty:
         st.info("No sales history found.")
     else:
+        # Salesman Data Isolation Logic
         if user_role != "Manager":
             sales_df["salesman_clean"] = sales_df["salesman"].astype(str).str.strip().str.lower()
             sales_df = sales_df[sales_df["salesman_clean"] == str(logged_user_name).strip().lower()]
@@ -199,6 +257,6 @@ elif active_tab == "📊 Reports & Statements":
         if not sales_df.empty:
             st.markdown("---")
             m1, m2, m3 = st.columns(3)
-            m1.metric("Total Bills", len(sales_df["invoice_no"].unique()))
-            m2.metric("Total Qty Sold", int(sales_df["qty"].sum()))
-            m3.metric("Total Revenue", f"₹ {sales_df['total_amount'].sum():,.2f}")
+            m1.metric("Total Bills Generated", len(sales_df["invoice_no"].unique()))
+            m2.metric("Total Units Sold", int(sales_df["qty"].sum()))
+            m3.metric("Total Revenue Collected", f"₹ {sales_df['total_amount'].sum():,.2f}")
