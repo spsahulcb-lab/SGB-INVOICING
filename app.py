@@ -31,7 +31,8 @@ if "GEMINI_API_KEY" in st.secrets:
 
 def process_bill_with_gemini(uploaded_file, text_input):
     try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Active and validated Gemini model
+        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = """
         Extract medicine invoice details from image or text for pharma wholesale ERP.
         Extract items with Batch, Expiry, Qty, Rate, MRP, and GST.
