@@ -24,19 +24,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# GEMINI AI SETUP
+# GEMINI AI SETUP (STRICTLY GEMINI 3 FLASH LIGHT)
 # ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 def process_bill_with_gemini(uploaded_file, text_input):
     try:
-        # Active and validated Gemini model
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Gemini 3 Flash Light Model for Ultra-Fast OCR & Handwritten Scan
+        model = genai.GenerativeModel('gemini-3.0-flash-preview')
+        
         prompt = """
         Extract medicine invoice details from image or text for pharma wholesale ERP.
         Extract items with Batch, Expiry, Qty, Rate, MRP, and GST.
-        Return ONLY a JSON array of objects without Markdown formatting:
+        Return ONLY a clean JSON array of objects without Markdown formatting:
         [
           {"PRODUCT": "Womensa Syrup", "BATCH": "B123", "EXP": "12/27", "QTY": 20, "RATE": 120.0, "MRP": 198.0, "GST": 12, "AMOUNT": 2400.0}
         ]
@@ -123,7 +124,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     
     st.markdown("""
         <div class='ai-box'>
-            <h3 style='color: #E65100; margin-top:0;'>📷 AI Bill Scanner</h3>
+            <h3 style='color: #E65100; margin-top:0;'>📷 AI Bill Scanner (Gemini 3 Flash Light)</h3>
             <p>Purchase Bill ya Handwritten Order Slip ki photo scan karein. Isko aap <b>Sales Entry</b> ya <b>Purchase Entry (Stock In)</b> dono me save kar sakte hain.</p>
         </div>
     """, unsafe_allow_html=True)
@@ -136,7 +137,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
     if st.button("✨ Auto-Extract via Gemini AI"):
         if uploaded_img or raw_text:
-            with st.spinner("AI Bill scan kar raha hai..."):
+            with st.spinner("Gemini 3 Flash Light scan kar raha hai..."):
                 items = process_bill_with_gemini(uploaded_img, raw_text)
                 if items:
                     st.session_state["scanned_cart"].extend(items)
@@ -157,7 +158,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     with f3:
         gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
 
-    # Manual Add Form (Batch & Expiry Support)
+    # Manual Add Form
     st.markdown("##### ➕ Manual Item Addition")
     p1, p2, p3, p4, p5, p6 = st.columns([2, 1, 1, 1, 1, 1])
     with p1:
@@ -180,7 +181,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             })
             st.rerun()
 
-    # Cart Display & Dual Save Option
+    # Cart Display
     if st.session_state["scanned_cart"]:
         st.markdown("---")
         st.subheader("🛒 Scanned / Current Bill Items")
@@ -193,32 +194,29 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         st.markdown(f"<h3 style='color:#E65100;'>💰 Sub Total: ₹ {total_val:,.2f} | GST (12%): ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>", unsafe_allow_html=True)
         
-        # Dual Save & Action Buttons
+        # Action Buttons
         save_col1, save_col2, save_col3, save_col4 = st.columns(4)
         
-        # 1. SAVE AS SALES ENTRY
         with save_col1:
             if st.button("📤 Save as SALES Entry"):
                 for row in st.session_state["scanned_cart"]:
                     row_entry = dict(row)
                     row_entry.update({"INVOICE": inv_no, "PARTY": party_name, "TYPE": "SALES", "DATE": datetime.now().strftime("%Y-%m-%d")})
                     st.session_state["sales_db"].append(row_entry)
-                st.success("✅ Saved to Sales Register & Debited!")
+                st.success("✅ Saved to Sales Register!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
-        # 2. SAVE AS PURCHASE ENTRY (STOCK IN)
         with save_col2:
             if st.button("📥 Save as PURCHASE (Stock In)"):
                 for row in st.session_state["scanned_cart"]:
                     row_entry = dict(row)
                     row_entry.update({"INVOICE": inv_no, "PARTY": party_name, "TYPE": "PURCHASE", "DATE": datetime.now().strftime("%Y-%m-%d")})
                     st.session_state["purchase_db"].append(row_entry)
-                st.success("✅ Saved to Purchase Register & Stock Added!")
+                st.success("✅ Saved to Purchase Register!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
-        # 3. WHATSAPP SHARE
         with save_col3:
             msg = f"🧾 *PHARMA WHOLESALE INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
@@ -226,7 +224,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:40px; border-radius:8px; border:none; width:100%;">📲 WhatsApp Share</button></a>', unsafe_allow_html=True)
 
-        # 4. CLEAR CART
         with save_col4:
             if st.button("🗑️ Clear List"):
                 st.session_state["scanned_cart"] = []
@@ -257,9 +254,6 @@ elif active_tab == "📥 Purchase History (Stock In)":
 # ==========================================
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch-Wise Stock & Expiry Tracking</h2>", unsafe_allow_html=True)
-    
-    st.warning("⚠️ Expiry Warning System: Checking products near expiry date.")
-    
     sample_stock = [
         {"PRODUCT": "ATPLEX Syrup", "BATCH": "B998", "EXP": "10/26", "STOCK QTY": 150, "MRP": 180.0},
         {"PRODUCT": "Womensa Syrup", "BATCH": "B882", "EXP": "04/26", "STOCK QTY": 80, "MRP": 198.0},
