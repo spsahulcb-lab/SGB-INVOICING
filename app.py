@@ -10,7 +10,7 @@ from PIL import Image
 from supabase import create_client, Client
 
 # ==========================================
-# PAGE CONFIG & STYLING
+# PAGE CONFIG & STYLING (ORANGE THEME)
 # ==========================================
 st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", initial_sidebar_state="expanded")
 
@@ -37,6 +37,13 @@ def init_local_db():
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, batch TEXT, exp TEXT, qty REAL, rate REAL, mrp REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, batch TEXT, exp TEXT, qty REAL, rate REAL, mrp REAL, gst REAL, amount REAL, created_at TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS users 
+                 (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT)''')
+    
+    # Default Users
+    c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
+    c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
+    
     conn.commit()
     conn.close()
 
@@ -56,6 +63,7 @@ def get_supabase_client():
 
 supabase = get_supabase_client()
 
+# Transaction Data Handling
 def save_transaction_data(table_name, items, invoice, party):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     records = []
@@ -79,10 +87,9 @@ def save_transaction_data(table_name, items, invoice, party):
         try:
             supabase.table(table_name).insert(records).execute()
             saved_cloud = True
-        except Exception as e:
-            st.warning(f"Cloud Connection Failed: Saving to local database instead.")
+        except Exception:
+            st.warning("Cloud Connection Issue: Saving to Local Storage.")
     
-    # Save to SQLite database as fallback
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for r in records:
@@ -106,6 +113,49 @@ def load_transaction_data(table_name):
     df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC", conn)
     conn.close()
     return df
+
+# User Management Database Functions
+def load_all_users():
+    if supabase:
+        try:
+            res = supabase.table("users").select("*").execute()
+            if res.data:
+                return {row["username"]: {"password": row["password"], "name": row["name"], "role": row["role"]} for row in res.data}
+        except Exception:
+            pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT username, password, name, role FROM users")
+    rows = c.fetchall()
+    conn.close()
+    return {r[0]: {"password": r[1], "name": r[2], "role": r[3]} for r in rows}
+
+def save_new_user(username, password, name, role):
+    if supabase:
+        try:
+            supabase.table("users").insert({"username": username, "password": password, "name": name, "role": role}).execute()
+        except Exception:
+            pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO users VALUES (?, ?, ?, ?)", (username, password, name, role))
+    conn.commit()
+    conn.close()
+
+def delete_user_db(username):
+    if supabase:
+        try:
+            supabase.table("users").delete().eq("username", username).execute()
+        except Exception:
+            pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM users WHERE username=?", (username,))
+    conn.commit()
+    conn.close()
 
 # ==========================================
 # GEMINI AI SETUP (GEMINI 3.5 FLASH-LITE)
@@ -211,13 +261,11 @@ MASTER_PRODUCTS = [
     "Panchaliv Syrup", "Alobyd-P", "Ureta", "Brainenza", "Cutpiles", "Acnetaz", "Dermapari"
 ]
 
-USERS_DB = {
-    "manager": {"password": "admin123", "role": "Manager", "name": "Manager"},
-    "satya": {"password": "satya123", "role": "Sales Executive", "name": "Satya Sahu"}
-}
-
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
 if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
+
+# Fetch All Users from Database
+USERS_DB = load_all_users()
 
 # Login Guard
 if not st.session_state["logged_in"]:
@@ -230,6 +278,7 @@ if not st.session_state["logged_in"]:
             if username_input in USERS_DB and USERS_DB[username_input]["password"] == password_input:
                 st.session_state["logged_in"] = True
                 st.session_state["logged_user"] = USERS_DB[username_input]
+                st.session_state["username"] = username_input
                 st.rerun()
             else:
                 st.error("❌ Invalid Username or Password")
@@ -240,12 +289,18 @@ logged_user = st.session_state["logged_user"]
 st.sidebar.title(f"🍊 {logged_user['name']}")
 st.sidebar.caption(f"Role: {logged_user['role']}")
 
-active_tab = st.sidebar.radio("Navigation", [
+nav_options = [
     "🤖 AI Smart Scan & Billing",
     "📦 Sales History",
     "📥 Purchase History (Stock In)",
     "🏭 Batch Stock & Expiry Alert"
-])
+]
+
+# Manager Only Menu Option
+if logged_user["role"] == "Manager":
+    nav_options.append("👥 User Management (Admin)")
+
+active_tab = st.sidebar.radio("Navigation", nav_options)
 
 if st.sidebar.button("🚪 Logout"):
     st.session_state["logged_in"] = False
@@ -284,12 +339,9 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     
     st.subheader("📝 Wholesale Bill Meta Info")
     f1, f2, f3 = st.columns(3)
-    with f1:
-        party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
-    with f2:
-        inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
-    with f3:
-        gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
+    with f1: party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
+    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
+    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
 
     st.markdown("##### ➕ Manual Item Addition")
     p1, p2, p3, p4, p5, p6 = st.columns([2, 1, 1, 1, 1, 1])
@@ -379,7 +431,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
-# Permanent History Registers
+# History Registers
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
     df_sales = load_transaction_data("sales")
@@ -403,3 +455,40 @@ elif active_tab == "🏭 Batch Stock & Expiry Alert":
         st.dataframe(df_pur[['product', 'batch', 'exp', 'qty', 'rate', 'mrp', 'created_at']], use_container_width=True)
     else:
         st.info("No Stock data available. Save a purchase bill first.")
+
+# USER MANAGEMENT PANEL (MANAGER ONLY)
+elif active_tab == "👥 User Management (Admin)":
+    st.markdown("<h2 style='color: #E65100;'>👥 Sales Team & User Management</h2>", unsafe_allow_html=True)
+    
+    u_col1, u_col2 = st.columns([1, 1])
+    
+    with u_col1:
+        st.markdown("### ➕ Add New Team Member")
+        new_username = st.text_input("User ID (e.g. rahul)").strip().lower()
+        new_password = st.text_input("Password", type="password")
+        new_name = st.text_input("Full Name (e.g. Rahul Sharma)")
+        new_role = st.selectbox("Role", ["Sales Executive", "Area Business Manager", "Manager"])
+        
+        if st.button("👤 Create User Account"):
+            if new_username and new_password and new_name:
+                save_new_user(new_username, new_password, new_name, new_role)
+                st.success(f"✅ User '{new_name}' created successfully!")
+                st.rerun()
+            else:
+                st.error("Please fill all details.")
+                
+    with u_col2:
+        st.markdown("### 📋 Active User Accounts")
+        current_users = load_all_users()
+        users_df = pd.DataFrame([
+            {"Username": k, "Name": v["name"], "Role": v["role"]} for k, v in current_users.items()
+        ])
+        st.dataframe(users_df, use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("##### 🗑️ Remove User Account")
+        del_username = st.selectbox("Select User to Remove", [u for u in current_users.keys() if u != "manager"])
+        if st.button("❌ Delete Selected User"):
+            delete_user_db(del_username)
+            st.success(f"User '{del_username}' removed.")
+            st.rerun()
