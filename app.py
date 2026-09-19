@@ -6,11 +6,12 @@ import urllib.parse
 import json
 import google.generativeai as genai
 from PIL import Image
+from supabase import create_client, Client
 
 # ==========================================
-# PAGE CONFIG & ORANGE THEME STYLING
+# PAGE CONFIG & STYLING
 # ==========================================
-st.set_page_config(page_title="Pharma ERP - Wholesale & AI Billing", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
@@ -24,7 +25,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# GEMINI AI SETUP
+# SUPABASE CLOUD DATABASE SETUP
+# ==========================================
+@st.cache_resource
+def init_supabase() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+try:
+    supabase = init_supabase()
+except Exception as e:
+    st.error(f"Supabase Connection Error: {e}")
+    st.stop()
+
+def save_to_supabase(table_name, items, invoice, party):
+    today = datetime.now().strftime("%Y-%m-%d %H:%M")
+    records = []
+    for row in items:
+        records.append({
+            "invoice": invoice,
+            "party": party,
+            "product": row.get('PRODUCT', ''),
+            "batch": row.get('BATCH', ''),
+            "exp": row.get('EXP', ''),
+            "qty": float(row.get('QTY', 0)),
+            "rate": float(row.get('RATE', 0)),
+            "mrp": float(row.get('MRP', 0)),
+            "gst": float(row.get('GST', 12)),
+            "amount": float(row.get('AMOUNT', 0)),
+            "created_at": today
+        })
+    supabase.table(table_name).insert(records).execute()
+
+def load_from_supabase(table_name):
+    res = supabase.table(table_name).select("*").order("id", desc=True).execute()
+    return pd.DataFrame(res.data)
+
+# ==========================================
+# GEMINI AI SETUP (GEMINI 3.5 FLASH-LITE)
 # ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -52,15 +91,18 @@ def process_bill_with_gemini(uploaded_file, text_input):
         
         cleaned_data = []
         for item in data:
-            try:
-                qty = float(item.get("QTY", 1) or 1)
-            except:
-                qty = 1.0
-            try:
-                rate = float(item.get("RATE", 0.0) or 0.0)
-            except:
-                rate = 0.0
+            try: qty = float(item.get("QTY", 1) or 1)
+            except: qty = 1.0
             
+            try: mrp = float(item.get("MRP", 0.0) or 0.0)
+            except: mrp = 0.0
+
+            try: rate = float(item.get("RATE", 0.0) or 0.0)
+            except: rate = 0.0
+            
+            if rate == 0.0 and mrp > 0:
+                rate = round(mrp * 0.7, 2)
+                
             amt = qty * rate
             cleaned_data.append({
                 "PRODUCT": str(item.get("PRODUCT", "Unknown")),
@@ -68,7 +110,7 @@ def process_bill_with_gemini(uploaded_file, text_input):
                 "EXP": str(item.get("EXP", "N/A")),
                 "QTY": qty,
                 "RATE": rate,
-                "MRP": float(item.get("MRP", rate * 1.5) or rate * 1.5),
+                "MRP": mrp if mrp > 0 else round(rate * 1.4, 2),
                 "GST": float(item.get("GST", 12) or 12),
                 "AMOUNT": amt
             })
@@ -90,7 +132,6 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     pdf.cell(190, 6, f"Invoice No: {inv} | Date: {datetime.now().strftime('%d-%m-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
     pdf.ln(5)
     
-    # Table Header
     pdf.set_font("Helvetica", 'B', 9)
     pdf.cell(60, 7, "Product", 1)
     pdf.cell(25, 7, "Batch", 1)
@@ -100,7 +141,6 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     pdf.cell(40, 7, "Amount (Rs)", 1)
     pdf.ln()
     
-    # Rows
     pdf.set_font("Helvetica", '', 9)
     for row in cart_data:
         pdf.cell(60, 6, str(row['PRODUCT'])[:28], 1)
@@ -117,10 +157,9 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     pdf.cell(190, 6, f"GST (12%): Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     
-    # Fixed FPDF2 output generation (returns bytes directly)
     return bytes(pdf.output())
 
-# Master & State Config
+# Master Data
 MASTER_PRODUCTS = [
     "ATPLEX Syrup", "Duty Beauty MINUS 16 Cream", "Duty Beauty Glutathione Soap",
     "Duty Beauty Facewash", "Kabja Band", "Cartibot", "Virload", "Womensa Syrup",
@@ -134,8 +173,6 @@ USERS_DB = {
 
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
 if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
-if "sales_db" not in st.session_state: st.session_state["sales_db"] = []
-if "purchase_db" not in st.session_state: st.session_state["purchase_db"] = []
 
 # Login Guard
 if not st.session_state["logged_in"]:
@@ -189,7 +226,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
     if st.button("✨ Auto-Extract via Gemini AI"):
         if uploaded_img or raw_text:
-            with st.spinner("AI scan kar raha hai..."):
+            with st.spinner("Gemini 3.5 Flash-Lite scan kar raha hai..."):
                 items = process_bill_with_gemini(uploaded_img, raw_text)
                 if items:
                     st.session_state["scanned_cart"].extend(items)
@@ -211,16 +248,11 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     st.markdown("##### ➕ Manual Item Addition")
     p1, p2, p3, p4, p5, p6 = st.columns([2, 1, 1, 1, 1, 1])
-    with p1:
-        sel_prod = st.selectbox("Product", MASTER_PRODUCTS)
-    with p2:
-        batch_num = st.text_input("Batch No", value="BT-102")
-    with p3:
-        exp_date = st.text_input("Expiry", value="08/27")
-    with p4:
-        s_qty = st.number_input("Qty", min_value=1, value=10)
-    with p5:
-        s_rate = st.number_input("Rate (₹)", min_value=0.0, value=120.0)
+    with p1: sel_prod = st.selectbox("Product", MASTER_PRODUCTS)
+    with p2: batch_num = st.text_input("Batch No", value="BT-102")
+    with p3: exp_date = st.text_input("Expiry", value="08/27")
+    with p4: s_qty = st.number_input("Qty", min_value=1, value=10)
+    with p5: s_rate = st.number_input("Rate (₹)", min_value=0.0, value=120.0)
     with p6:
         st.write("")
         st.write("")
@@ -231,25 +263,28 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             })
             st.rerun()
 
-    # Display Cart & Correct Totals
+    # Display Cart
     if st.session_state["scanned_cart"]:
         st.markdown("---")
         st.subheader("🛒 Scanned / Current Bill Items")
         
-        # Ensure values are float for sums
         for item in st.session_state["scanned_cart"]:
-            try:
-                item["QTY"] = float(item.get("QTY", 0))
-            except:
-                item["QTY"] = 0.0
-            try:
-                item["RATE"] = float(item.get("RATE", 0))
-            except:
-                item["RATE"] = 0.0
-            item["AMOUNT"] = item["QTY"] * item["RATE"]
+            try: qty = float(item.get("QTY", 0))
+            except: qty = 0.0
+            try: rate = float(item.get("RATE", 0))
+            except: rate = 0.0
+            try: mrp = float(item.get("MRP", 0))
+            except: mrp = 0.0
+                
+            if rate == 0.0 and mrp > 0:
+                rate = round(mrp * 0.7, 2)
+                item["RATE"] = rate
+                
+            item["QTY"] = qty
+            item["AMOUNT"] = qty * rate
             
         cart_df = pd.DataFrame(st.session_state["scanned_cart"])
-        st.dataframe(cart_df, use_container_width=True)
+        st.data_editor(cart_df, key="cart_editor", disabled=["AMOUNT"], use_container_width=True)
         
         total_val = float(cart_df["AMOUNT"].sum())
         gst_val = total_val * 0.12
@@ -257,26 +292,19 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         st.markdown(f"<h3 style='color:#E65100;'>💰 Sub Total: ₹ {total_val:,.2f} | GST (12%): ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>", unsafe_allow_html=True)
         
-        # Action Buttons
         save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
         
         with save_col1:
             if st.button("📤 Save SALES"):
-                for row in st.session_state["scanned_cart"]:
-                    r = dict(row)
-                    r.update({"INVOICE": inv_no, "PARTY": party_name, "TYPE": "SALES", "DATE": datetime.now().strftime("%Y-%m-%d")})
-                    st.session_state["sales_db"].append(r)
-                st.success("Saved to Sales!")
+                save_to_supabase("sales", st.session_state["scanned_cart"], inv_no, party_name)
+                st.success("✅ Saved to Supabase Sales Cloud!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
         with save_col2:
             if st.button("📥 Save PURCHASE"):
-                for row in st.session_state["scanned_cart"]:
-                    r = dict(row)
-                    r.update({"INVOICE": inv_no, "PARTY": party_name, "TYPE": "PURCHASE", "DATE": datetime.now().strftime("%Y-%m-%d")})
-                    st.session_state["purchase_db"].append(r)
-                st.success("Saved to Purchase!")
+                save_to_supabase("purchase", st.session_state["scanned_cart"], inv_no, party_name)
+                st.success("✅ Saved to Supabase Purchase Cloud!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
@@ -304,25 +332,27 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
-# History Registers
+# Permanent Supabase Registers
 elif active_tab == "📦 Sales History":
-    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
-    if st.session_state["sales_db"]:
-        st.dataframe(pd.DataFrame(st.session_state["sales_db"]), use_container_width=True)
+    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register (Supabase Cloud)</h2>", unsafe_allow_html=True)
+    df_sales = load_from_supabase("sales")
+    if not df_sales.empty:
+        st.dataframe(df_sales, use_container_width=True)
     else:
-        st.info("No Sales records found.")
+        st.info("No Sales records found in Supabase Cloud Database.")
 
 elif active_tab == "📥 Purchase History (Stock In)":
-    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
-    if st.session_state["purchase_db"]:
-        st.dataframe(pd.DataFrame(st.session_state["purchase_db"]), use_container_width=True)
+    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register (Supabase Cloud)</h2>", unsafe_allow_html=True)
+    df_purchase = load_from_supabase("purchase")
+    if not df_purchase.empty:
+        st.dataframe(df_purchase, use_container_width=True)
     else:
-        st.info("No Purchase records found.")
+        st.info("No Purchase records found in Supabase Cloud Database.")
 
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch-Wise Stock & Expiry</h2>", unsafe_allow_html=True)
-    sample_stock = [
-        {"PRODUCT": "ATPLEX Syrup", "BATCH": "B998", "EXP": "10/26", "STOCK QTY": 150, "MRP": 180.0},
-        {"PRODUCT": "Womensa Syrup", "BATCH": "B882", "EXP": "04/26", "STOCK QTY": 80, "MRP": 198.0}
-    ]
-    st.dataframe(pd.DataFrame(sample_stock), use_container_width=True)
+    df_pur = load_from_supabase("purchase")
+    if not df_pur.empty:
+        st.dataframe(df_pur[['product', 'batch', 'exp', 'qty', 'rate', 'mrp', 'created_at']], use_container_width=True)
+    else:
+        st.info("No Stock data available in Supabase. Save a purchase bill first.")
