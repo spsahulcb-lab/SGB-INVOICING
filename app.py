@@ -24,15 +24,15 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# GEMINI AI SETUP (STRICTLY GEMINI 3 FLASH LIGHT)
+# GEMINI AI SETUP (GEMINI 3.5 FLASH-LITE)
 # ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
 def process_bill_with_gemini(uploaded_file, text_input):
     try:
-        # Gemini 3 Flash Light Model for Ultra-Fast OCR & Handwritten Scan
-        model = genai.GenerativeModel('gemini-3.0-flash-preview')
+        # Strictly using Gemini 3.5 Flash Lite Model
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
         
         prompt = """
         Extract medicine invoice details from image or text for pharma wholesale ERP.
@@ -124,7 +124,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     
     st.markdown("""
         <div class='ai-box'>
-            <h3 style='color: #E65100; margin-top:0;'>📷 AI Bill Scanner (Gemini 3 Flash Light)</h3>
+            <h3 style='color: #E65100; margin-top:0;'>📷 AI Bill Scanner (Gemini 3.5 Flash-Lite)</h3>
             <p>Purchase Bill ya Handwritten Order Slip ki photo scan karein. Isko aap <b>Sales Entry</b> ya <b>Purchase Entry (Stock In)</b> dono me save kar sakte hain.</p>
         </div>
     """, unsafe_allow_html=True)
@@ -137,7 +137,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
     if st.button("✨ Auto-Extract via Gemini AI"):
         if uploaded_img or raw_text:
-            with st.spinner("Gemini 3 Flash Light scan kar raha hai..."):
+            with st.spinner("Gemini 3.5 Flash-Lite scan kar raha hai..."):
                 items = process_bill_with_gemini(uploaded_img, raw_text)
                 if items:
                     st.session_state["scanned_cart"].extend(items)
