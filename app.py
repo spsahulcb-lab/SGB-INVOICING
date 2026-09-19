@@ -4,6 +4,7 @@ from datetime import datetime
 from fpdf import FPDF
 import urllib.parse
 import json
+import sqlite3
 import google.generativeai as genai
 from PIL import Image
 from supabase import create_client, Client
@@ -25,21 +26,37 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# SUPABASE CLOUD DATABASE SETUP
+# HYBRID DATABASE SETUP (SUPABASE + LOCAL SQLITE)
 # ==========================================
+DB_FILE = "pharma_erp.db"
+
+def init_local_db():
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS sales 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, batch TEXT, exp TEXT, qty REAL, rate REAL, mrp REAL, gst REAL, amount REAL, created_at TEXT)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS purchase 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, batch TEXT, exp TEXT, qty REAL, rate REAL, mrp REAL, gst REAL, amount REAL, created_at TEXT)''')
+    conn.commit()
+    conn.close()
+
+init_local_db()
+
 @st.cache_resource
-def init_supabase() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+def get_supabase_client():
+    if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
+        try:
+            url = st.secrets["SUPABASE_URL"]
+            key = st.secrets["SUPABASE_KEY"]
+            if "supabase.co" in url:
+                return create_client(url, key)
+        except Exception:
+            return None
+    return None
 
-try:
-    supabase = init_supabase()
-except Exception as e:
-    st.error(f"Supabase Connection Error: {e}")
-    st.stop()
+supabase = get_supabase_client()
 
-def save_to_supabase(table_name, items, invoice, party):
+def save_transaction_data(table_name, items, invoice, party):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     records = []
     for row in items:
@@ -56,11 +73,39 @@ def save_to_supabase(table_name, items, invoice, party):
             "amount": float(row.get('AMOUNT', 0)),
             "created_at": today
         })
-    supabase.table(table_name).insert(records).execute()
+    
+    saved_cloud = False
+    if supabase:
+        try:
+            supabase.table(table_name).insert(records).execute()
+            saved_cloud = True
+        except Exception as e:
+            st.warning(f"Cloud Connection Failed: Saving to local database instead.")
+    
+    # Save to SQLite database as fallback
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    for r in records:
+        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, batch, exp, qty, rate, mrp, gst, amount, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (r["invoice"], r["party"], r["product"], r["batch"], r["exp"], r["qty"], r["rate"], r["mrp"], r["gst"], r["amount"], r["created_at"]))
+    conn.commit()
+    conn.close()
+    return saved_cloud
 
-def load_from_supabase(table_name):
-    res = supabase.table(table_name).select("*").order("id", desc=True).execute()
-    return pd.DataFrame(res.data)
+def load_transaction_data(table_name):
+    if supabase:
+        try:
+            res = supabase.table(table_name).select("*").order("id", desc=True).execute()
+            if res.data:
+                return pd.DataFrame(res.data)
+        except Exception:
+            pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC", conn)
+    conn.close()
+    return df
 
 # ==========================================
 # GEMINI AI SETUP (GEMINI 3.5 FLASH-LITE)
@@ -159,7 +204,7 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     
     return bytes(pdf.output())
 
-# Master Data
+# Configuration
 MASTER_PRODUCTS = [
     "ATPLEX Syrup", "Duty Beauty MINUS 16 Cream", "Duty Beauty Glutathione Soap",
     "Duty Beauty Facewash", "Kabja Band", "Cartibot", "Virload", "Womensa Syrup",
@@ -296,15 +341,17 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         with save_col1:
             if st.button("📤 Save SALES"):
-                save_to_supabase("sales", st.session_state["scanned_cart"], inv_no, party_name)
-                st.success("✅ Saved to Supabase Sales Cloud!")
+                saved_cloud = save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name)
+                msg = "Saved to Sales (Cloud + Local)!" if saved_cloud else "Saved to Local Sales Database!"
+                st.success(f"✅ {msg}")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
         with save_col2:
             if st.button("📥 Save PURCHASE"):
-                save_to_supabase("purchase", st.session_state["scanned_cart"], inv_no, party_name)
-                st.success("✅ Saved to Supabase Purchase Cloud!")
+                saved_cloud = save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name)
+                msg = "Saved to Purchase (Cloud + Local)!" if saved_cloud else "Saved to Local Purchase Database!"
+                st.success(f"✅ {msg}")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
@@ -332,27 +379,27 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
-# Permanent Supabase Registers
+# Permanent History Registers
 elif active_tab == "📦 Sales History":
-    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register (Supabase Cloud)</h2>", unsafe_allow_html=True)
-    df_sales = load_from_supabase("sales")
+    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
+    df_sales = load_transaction_data("sales")
     if not df_sales.empty:
         st.dataframe(df_sales, use_container_width=True)
     else:
-        st.info("No Sales records found in Supabase Cloud Database.")
+        st.info("No Sales records found in Database.")
 
 elif active_tab == "📥 Purchase History (Stock In)":
-    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register (Supabase Cloud)</h2>", unsafe_allow_html=True)
-    df_purchase = load_from_supabase("purchase")
+    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
+    df_purchase = load_transaction_data("purchase")
     if not df_purchase.empty:
         st.dataframe(df_purchase, use_container_width=True)
     else:
-        st.info("No Purchase records found in Supabase Cloud Database.")
+        st.info("No Purchase records found in Database.")
 
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch-Wise Stock & Expiry</h2>", unsafe_allow_html=True)
-    df_pur = load_from_supabase("purchase")
+    df_pur = load_transaction_data("purchase")
     if not df_pur.empty:
         st.dataframe(df_pur[['product', 'batch', 'exp', 'qty', 'rate', 'mrp', 'created_at']], use_container_width=True)
     else:
-        st.info("No Stock data available in Supabase. Save a purchase bill first.")
+        st.info("No Stock data available. Save a purchase bill first.")
