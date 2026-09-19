@@ -50,12 +50,17 @@ def process_bill_with_gemini(uploaded_file, text_input):
         clean_txt = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(clean_txt)
         
-        # Ensure Numeric Data Conversion for Calculations
         cleaned_data = []
         for item in data:
-            qty = float(item.get("QTY", 1) or 1)
-            rate = float(item.get("RATE", 0.0) or 0.0)
-            gst = float(item.get("GST", 12) or 12)
+            try:
+                qty = float(item.get("QTY", 1) or 1)
+            except:
+                qty = 1.0
+            try:
+                rate = float(item.get("RATE", 0.0) or 0.0)
+            except:
+                rate = 0.0
+            
             amt = qty * rate
             cleaned_data.append({
                 "PRODUCT": str(item.get("PRODUCT", "Unknown")),
@@ -64,7 +69,7 @@ def process_bill_with_gemini(uploaded_file, text_input):
                 "QTY": qty,
                 "RATE": rate,
                 "MRP": float(item.get("MRP", rate * 1.5) or rate * 1.5),
-                "GST": gst,
+                "GST": float(item.get("GST", 12) or 12),
                 "AMOUNT": amt
             })
         return cleaned_data
@@ -73,20 +78,20 @@ def process_bill_with_gemini(uploaded_file, text_input):
         return []
 
 # ==========================================
-# PDF GENERATOR FUNCTION
+# FIXED PDF GENERATOR FUNCTION
 # ==========================================
 def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(190, 10, "SGB / LCB PHARMA WHOLESALE INVOICE", border=0, ln=1, align='C')
-    pdf.set_font("Arial", '', 10)
-    pdf.cell(190, 6, f"Party: {party} | GSTIN: {gst}", border=0, ln=1, align='C')
-    pdf.cell(190, 6, f"Invoice No: {inv} | Date: {datetime.now().strftime('%d-%m-%Y')}", border=0, ln=1, align='C')
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(190, 10, "SGB / LCB PHARMA WHOLESALE INVOICE", new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(190, 6, f"Party: {party} | GSTIN: {gst}", new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.cell(190, 6, f"Invoice No: {inv} | Date: {datetime.now().strftime('%d-%m-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
     pdf.ln(5)
     
     # Table Header
-    pdf.set_font("Arial", 'B', 9)
+    pdf.set_font("Helvetica", 'B', 9)
     pdf.cell(60, 7, "Product", 1)
     pdf.cell(25, 7, "Batch", 1)
     pdf.cell(20, 7, "Exp", 1)
@@ -96,7 +101,7 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
     pdf.ln()
     
     # Rows
-    pdf.set_font("Arial", '', 9)
+    pdf.set_font("Helvetica", '', 9)
     for row in cart_data:
         pdf.cell(60, 6, str(row['PRODUCT'])[:28], 1)
         pdf.cell(25, 6, str(row.get('BATCH', 'N/A')), 1)
@@ -107,12 +112,13 @@ def generate_pdf_invoice(party, inv, gst, cart_data, total, gst_val, net_val):
         pdf.ln()
         
     pdf.ln(4)
-    pdf.set_font("Arial", 'B', 10)
-    pdf.cell(190, 6, f"Sub Total: Rs. {total:,.2f}", ln=1, align='R')
-    pdf.cell(190, 6, f"GST (12%): Rs. {gst_val:,.2f}", ln=1, align='R')
-    pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", ln=1, align='R')
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(190, 6, f"Sub Total: Rs. {total:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
+    pdf.cell(190, 6, f"GST (12%): Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
+    pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     
-    return pdf.output(dest='S').encode('latin-1')
+    # Fixed FPDF2 output generation (returns bytes directly)
+    return bytes(pdf.output())
 
 # Master & State Config
 MASTER_PRODUCTS = [
@@ -230,10 +236,16 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         st.markdown("---")
         st.subheader("🛒 Scanned / Current Bill Items")
         
-        # Recalculate totals cleanly
+        # Ensure values are float for sums
         for item in st.session_state["scanned_cart"]:
-            item["QTY"] = float(item.get("QTY", 0))
-            item["RATE"] = float(item.get("RATE", 0))
+            try:
+                item["QTY"] = float(item.get("QTY", 0))
+            except:
+                item["QTY"] = 0.0
+            try:
+                item["RATE"] = float(item.get("RATE", 0))
+            except:
+                item["RATE"] = 0.0
             item["AMOUNT"] = item["QTY"] * item["RATE"]
             
         cart_df = pd.DataFrame(st.session_state["scanned_cart"])
@@ -245,7 +257,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         st.markdown(f"<h3 style='color:#E65100;'>💰 Sub Total: ₹ {total_val:,.2f} | GST (12%): ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>", unsafe_allow_html=True)
         
-        # Action Buttons Including PDF Download
+        # Action Buttons
         save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
         
         with save_col1:
@@ -269,13 +281,16 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
         with save_col3:
-            pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_val, gst_val, net_val)
-            st.download_button(
-                label="📄 Download PDF",
-                data=pdf_bytes,
-                file_name=f"{inv_no}.pdf",
-                mime="application/pdf"
-            )
+            try:
+                pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_val, gst_val, net_val)
+                st.download_button(
+                    label="📄 Download PDF",
+                    data=pdf_bytes,
+                    file_name=f"{inv_no}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as pdf_err:
+                st.error(f"PDF Generation Error: {pdf_err}")
 
         with save_col4:
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
