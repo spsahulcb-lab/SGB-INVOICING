@@ -242,12 +242,9 @@ def clean_float(val, default=0.0):
 def filter_by_date_range(df, start_date, end_date, date_col='created_at'):
     if df.empty or date_col not in df.columns:
         return df
-    
-    # Convert column to datetime
     temp_dates = pd.to_datetime(df[date_col], errors='coerce').dt.date
     s_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
     e_date = end_date if isinstance(end_date, date) else pd.to_datetime(end_date).date()
-    
     return df[(temp_dates >= s_date) & (temp_dates <= e_date)]
 
 def get_existing_parties():
@@ -603,7 +600,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
 # ==========================================
-# 2. SALES HISTORY (WITH DATE RANGE FILTER)
+# 2. SALES HISTORY
 # ==========================================
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
@@ -611,7 +608,6 @@ elif active_tab == "📦 Sales History":
     df_sales = load_transaction_data("sales")
     
     if not df_sales.empty:
-        # Date Filter Row
         st.markdown("##### 📅 Date Range Filter")
         d_col1, d_col2 = st.columns(2)
         with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="sal_start")
@@ -670,7 +666,7 @@ elif active_tab == "📦 Sales History":
         st.info("No Sales records found in selected range.")
 
 # ==========================================
-# 3. PURCHASE HISTORY (WITH DATE RANGE FILTER)
+# 3. PURCHASE HISTORY
 # ==========================================
 elif active_tab == "📥 Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
@@ -678,7 +674,6 @@ elif active_tab == "📥 Purchase History (Stock In)":
     df_purchase = load_transaction_data("purchase")
     
     if not df_purchase.empty:
-        # Date Filter Row
         st.markdown("##### 📅 Date Range Filter")
         d_col1, d_col2 = st.columns(2)
         with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="pur_start")
@@ -737,7 +732,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
         st.info("No Purchase records found in selected range.")
 
 # ==========================================
-# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY (WITH DATE RANGE FILTER)
+# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY
 # ==========================================
 elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock & Quantity-Value Summary</h2>", unsafe_allow_html=True)
@@ -776,14 +771,31 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 merged['Avg Purchase Rate'] = merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                 merged['Net Stock Value (₹)'] = merged['Net Stock Qty'] * merged['Avg Purchase Rate']
                 
+                # Grand Totals Row Calculation
+                tot_p_qty = merged['Purchase_Qty'].sum()
+                tot_p_val = merged['Purchase_Value'].sum()
+                tot_s_qty = merged['Sales_Qty'].sum()
+                tot_s_val = merged['Sales_Value'].sum()
+                tot_n_qty = merged['Net Stock Qty'].sum()
+                tot_n_val = merged['Net Stock Value (₹)'].sum()
+                
                 display_df = merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                 display_df.columns = ['Product', 'Total Purchase Qty', 'Total Purchase Value (₹)', 'Total Sales Qty', 'Total Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                 
+                # Format Monetary values for display
                 display_df['Total Purchase Value (₹)'] = display_df['Total Purchase Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Total Sales Value (₹)'] = display_df['Total Sales Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Net Stock Value (₹)'] = display_df['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
                 
                 st.dataframe(display_df, use_container_width=True)
+                
+                # Display Grand Total Metric Box
+                st.markdown("---")
+                st.markdown("### 📊 Grand Total Summary")
+                t1, t2, t3 = st.columns(3)
+                t1.metric("📦 Total Purchase (Qty & Value)", f"{tot_p_qty:,.0f} Qty", f"₹ {tot_p_val:,.2f}")
+                t2.metric("🛍️ Total Sales (Qty & Value)", f"{tot_s_qty:,.0f} Qty", f"₹ {tot_s_val:,.2f}")
+                t3.metric("🏷️ Net Stock (Qty & Value)", f"{tot_n_qty:,.0f} Qty", f"₹ {tot_n_val:,.2f}")
             else:
                 st.info("No stock data available in selected date range.")
         
@@ -828,6 +840,13 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                     sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                     sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
                     
+                    sr_tp_qty = sr_merged['Purchase_Qty'].sum()
+                    sr_tp_val = sr_merged['Purchase_Value'].sum()
+                    sr_ts_qty = sr_merged['Sales_Qty'].sum()
+                    sr_ts_val = sr_merged['Sales_Value'].sum()
+                    sr_tn_qty = sr_merged['Net Stock Qty'].sum()
+                    sr_tn_val = sr_merged['Net Stock Value (₹)'].sum()
+                    
                     sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                     sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                     
@@ -837,6 +856,13 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                     
                     st.subheader(f"📋 Product Summary for {selected_sr}")
                     st.dataframe(sr_display, use_container_width=True)
+                    
+                    st.markdown("---")
+                    st.markdown(f"### 📊 Total Summary for {selected_sr}")
+                    t1, t2, t3 = st.columns(3)
+                    t1.metric("📦 Purchase (Qty & Value)", f"{sr_tp_qty:,.0f} Qty", f"₹ {sr_tp_val:,.2f}")
+                    t2.metric("🛍️ Sales (Qty & Value)", f"{sr_ts_qty:,.0f} Qty", f"₹ {sr_ts_val:,.2f}")
+                    t3.metric("🏷️ Net Stock (Qty & Value)", f"{sr_tn_qty:,.0f} Qty", f"₹ {sr_tn_val:,.2f}")
                 else:
                     st.info(f"No records found for Sales Executive '{selected_sr}' in selected range.")
             else:
@@ -864,10 +890,24 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
             sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
             sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
             
+            sr_tp_qty = sr_merged['Purchase_Qty'].sum()
+            sr_tp_val = sr_merged['Purchase_Value'].sum()
+            sr_ts_qty = sr_merged['Sales_Qty'].sum()
+            sr_ts_val = sr_merged['Sales_Value'].sum()
+            sr_tn_qty = sr_merged['Net Stock Qty'].sum()
+            sr_tn_val = sr_merged['Net Stock Value (₹)'].sum()
+            
             sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
             sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
             
             st.dataframe(sr_display, use_container_width=True)
+            
+            st.markdown("---")
+            st.markdown("### 📊 Your Total Summary")
+            t1, t2, t3 = st.columns(3)
+            t1.metric("📦 Purchase (Qty & Value)", f"{sr_tp_qty:,.0f} Qty", f"₹ {sr_tp_val:,.2f}")
+            t2.metric("🛍️ Sales (Qty & Value)", f"{sr_ts_qty:,.0f} Qty", f"₹ {sr_ts_val:,.2f}")
+            t3.metric("🏷️ Net Stock (Qty & Value)", f"{sr_tn_qty:,.0f} Qty", f"₹ {sr_tn_val:,.2f}")
         else:
             st.info("No Stock data available for your ID in selected range.")
 
