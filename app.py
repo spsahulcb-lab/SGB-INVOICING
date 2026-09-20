@@ -35,6 +35,8 @@ DB_FILE = "pharma_erp.db"
 def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
+    
+    # Create tables if not exist
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
@@ -44,6 +46,13 @@ def init_local_db():
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
+    # Auto Migration for sales & purchase tables
+    for tbl in ["sales", "purchase"]:
+        for col, dtype in [("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
+            try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
+            except Exception: pass
+            
+    # Auto Migration for master_products
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
         except Exception: pass
@@ -135,6 +144,34 @@ def bulk_upload_master_products(records):
     conn.commit()
     conn.close()
 
+def sync_entire_master_products(edited_df):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM master_products")
+    
+    records = []
+    for _, r in edited_df.iterrows():
+        p_name = str(r.get("product_name", "")).strip()
+        if p_name and p_name.lower() != "nan":
+            pack = str(r.get("pack", ""))
+            mrp = clean_float(r.get("mrp"), 0.0)
+            rate = clean_float(r.get("rate"), 0.0)
+            tax = clean_float(r.get("tax"), 12.0)
+            
+            c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+                      (p_name, pack, mrp, rate, tax))
+            records.append({"product_name": p_name, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax})
+            
+    conn.commit()
+    conn.close()
+    
+    if supabase:
+        try:
+            supabase.table("master_products").delete().neq("id", -1).execute()
+            if records:
+                supabase.table("master_products").insert(records).execute()
+        except Exception: pass
+
 def auto_correct_brand(scanned_name, master_list):
     if not scanned_name or str(scanned_name).strip() == "":
         return "Unknown Item"
@@ -222,18 +259,14 @@ def delete_user_db(username):
     conn.commit()
     conn.close()
 
-# Helper function to extract clean floats even from strings like 'GST5%'
 def clean_float(val, default=0.0):
     if pd.isnull(val) or val is None:
         return default
     val_str = str(val).strip()
-    # Extract numbers or decimal from string like GST5% -> 5.0
     match = re.search(r"[-+]?\d*\.\d+|\d+", val_str)
     if match:
-        try:
-            return float(match.group())
-        except ValueError:
-            return default
+        try: return float(match.group())
+        except ValueError: return default
     return default
 
 # ==========================================
@@ -264,8 +297,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             response = model.generate_content([prompt, text_input])
             
         clean_txt = response.text.replace("```json", "").replace("```", "").strip()
-        
-        # Regex search to extract json array if there is extra text
         json_match = re.search(r'\[.*\]', clean_txt, re.DOTALL)
         if json_match:
             clean_txt = json_match.group(0)
@@ -279,7 +310,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
-            
             qty = clean_float(item.get("QTY"), default=1.0)
             deal = str(item.get("DEAL", "NA"))
             
@@ -294,7 +324,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             if rate == 0.0 and not m_match.empty:
                 rate = clean_float(m_match["rate"].values[0])
             
-            # Net rate / Discount logic -> Auto GST 0
             if disc_pct > 0 or disc_rs > 0:
                 gst = 0.0
             else:
@@ -648,12 +677,26 @@ elif active_tab == "🏷️ Manage Master Products":
                 st.error(f"Error reading file: {ex}. Try saving the Excel file as .xlsx format.")
 
     with m_col2:
-        st.markdown("### 📋 Master Products Database")
-        m_df = load_master_products()
-        st.dataframe(m_df, use_container_width=True)
+        st.markdown("### 📋 Editable Master Products Database")
+        st.info("💡 **Tips:** Double-click any cell to edit. Add/Delete rows directly in table. Click 'Save Database Changes' to apply.")
         
+        m_df = load_master_products()
+        display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
+        
+        edited_master_df = st.data_editor(
+            display_df,
+            key="master_db_editor",
+            num_rows="dynamic",
+            use_container_width=True
+        )
+        
+        if st.button("💾 Save Database Changes"):
+            sync_entire_master_products(edited_master_df)
+            st.success("✅ Master Database successfully updated!")
+            st.rerun()
+            
         st.markdown("---")
-        st.markdown("##### 🗑️ Remove Product")
+        st.markdown("##### 🗑️ Remove Product via Selectbox")
         p_del_list = m_df["product_name"].tolist() if not m_df.empty else ["None"]
         del_p = st.selectbox("Select Product to Delete", p_del_list)
         if st.button("❌ Delete Product"):
