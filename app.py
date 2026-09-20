@@ -572,17 +572,27 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
     df_sales = load_transaction_data("sales")
-    st.dataframe(df_sales, use_container_width=True) if not df_sales.empty else st.info("No Sales records found.")
+    if not df_sales.empty:
+        st.dataframe(df_sales, use_container_width=True)
+    else:
+        st.info("No Sales records found.")
 
 elif active_tab == "📥 Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
     df_purchase = load_transaction_data("purchase")
-    st.dataframe(df_purchase, use_container_width=True) if not df_purchase.empty else st.info("No Purchase records found.")
+    if not df_purchase.empty:
+        st.dataframe(df_purchase, use_container_width=True)
+    else:
+        st.info("No Purchase records found.")
 
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock Overview</h2>", unsafe_allow_html=True)
     df_pur = load_transaction_data("purchase")
-    st.dataframe(df_pur[['product', 'pack', 'qty', 'free_qty', 'mrp', 'rate', 'created_at']], use_container_width=True) if not df_pur.empty else st.info("No Stock data available.")
+    if not df_pur.empty:
+        cols_to_show = [c for c in ['product', 'pack', 'qty', 'free_qty', 'mrp', 'rate', 'created_at'] if c in df_pur.columns]
+        st.dataframe(df_pur[cols_to_show], use_container_width=True)
+    else:
+        st.info("No Stock data available.")
 
 elif active_tab == "👥 User Management (Admin)":
     st.markdown("<h2 style='color: #E65100;'>👥 Sales Team & User Management</h2>", unsafe_allow_html=True)
