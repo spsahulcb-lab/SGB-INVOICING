@@ -36,7 +36,6 @@ def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Create tables if not exist (including sr_username column)
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT, sr_username TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
@@ -46,7 +45,6 @@ def init_local_db():
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
-    # Auto Migration for sr_username, batch, expiry
     for tbl in ["sales", "purchase"]:
         for col, dtype in [("sr_username", "TEXT"), ("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
@@ -56,7 +54,6 @@ def init_local_db():
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
         except Exception: pass
     
-    # Default Users
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
@@ -157,8 +154,8 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
             "party": party,
             "product": row.get('PRODUCT', ''),
             "pack": row.get('PACK', '1x10'),
-            "batch": str(row.get('BATCH', 'B001')),
-            "expiry": str(row.get('EXPIRY', '12/28')),
+            "batch": str(row.get('BATCH', '00')),
+            "expiry": str(row.get('EXPIRY', '00')),
             "qty": float(row.get('QTY', 0)),
             "free_qty": str(row.get('DEAL/FREE', '')),
             "mrp": float(row.get('MRP', 0)),
@@ -242,6 +239,14 @@ def clean_float(val, default=0.0):
         except ValueError: return default
     return default
 
+# Helper to get existing parties list
+def get_existing_parties():
+    sales_df = load_transaction_data("sales")
+    pur_df = load_transaction_data("purchase")
+    p1 = sales_df['party'].dropna().unique().tolist() if not sales_df.empty else []
+    p2 = pur_df['party'].dropna().unique().tolist() if not pur_df.empty else []
+    return sorted(list(set(p1 + p2)))
+
 # ==========================================
 # GEMINI AI SETUP
 # ==========================================
@@ -260,7 +265,7 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
         JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "1x10", "BATCH": "B123", "EXPIRY": "12/28", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
+          {{"PRODUCT": "Item Name", "PACK": "1x10", "BATCH": "00", "EXPIRY": "00", "QTY": 10, "DEAL": "NA", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
         ]
         """
         if uploaded_file:
@@ -283,8 +288,8 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "1x10")
-            batch = str(item.get("BATCH", "B001"))
-            expiry = str(item.get("EXPIRY", "12/28"))
+            batch = str(item.get("BATCH", "00"))
+            expiry = str(item.get("EXPIRY", "00"))
             qty = clean_float(item.get("QTY"), default=1.0)
             deal = str(item.get("DEAL", "NA"))
             
@@ -359,8 +364,8 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, su
     for row in cart_data:
         pdf.cell(35, 6, str(row['PRODUCT'])[:18], 1)
         pdf.cell(12, 6, str(row.get('PACK', '1x10'))[:6], 1)
-        pdf.cell(15, 6, str(row.get('BATCH', ''))[:8], 1)
-        pdf.cell(12, 6, str(row.get('EXPIRY', ''))[:6], 1)
+        pdf.cell(15, 6, str(row.get('BATCH', '00'))[:8], 1)
+        pdf.cell(12, 6, str(row.get('EXPIRY', '00'))[:6], 1)
         pdf.cell(12, 6, str(row['QTY']), 1)
         pdf.cell(12, 6, str(row.get('DEAL/FREE', '')), 1)
         pdf.cell(18, 6, f"{float(row['MRP']):.2f}", 1)
@@ -450,21 +455,46 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     
     st.subheader("📝 Wholesale Bill Meta Info")
     f1, f2, f3 = st.columns(3)
-    with f1: party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
-    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
-    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
+    
+    existing_parties = get_existing_parties()
+    with f1:
+        party_mode = st.radio("Party Input Mode:", ["Select Saved Party", "Type New Party"], horizontal=True)
+        if party_mode == "Select Saved Party" and existing_parties:
+            party_name = st.selectbox("Select Party / Medical Store", existing_parties)
+        else:
+            party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
+            
+    with f2: inv_no = st.text_input("Invoice No", value="00")
+    with f3: gst_no = st.text_input("Party GSTIN", value="00")
 
     st.markdown("##### ➕ Manual Item Addition")
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["Gross Rate Mode (With GST)", "NET RATE Mode (GST Excluded / 0%)"], horizontal=True)
 
+    df_purchases = load_transaction_data("purchase")
+
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
         p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
-        with p1: sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST if MASTER_LIST else ["Select Product"])
-        with p2: m_pack = st.text_input("Pack", value="1x10", key="net_pack")
-        with p3: m_batch = st.text_input("Batch", value="B001", key="net_batch")
-        with p4: m_exp = st.text_input("Expiry", value="12/28", key="net_exp")
+        with p1: 
+            sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST if MASTER_LIST else ["Select Product"])
+            
+        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty else pd.DataFrame()
+        default_pack = m_row["pack"].values[0] if not m_row.empty else "1x10"
+        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 150.0
+        default_tax = float(m_row["tax"].values[0]) if not m_row.empty else 5.0
+        
+        batch_val = "00"
+        exp_val = "00"
+        if not df_purchases.empty:
+            p_match = df_purchases[df_purchases["product"] == sel_prod]
+            if not p_match.empty:
+                batch_val = str(p_match.iloc[0].get("batch", "00"))
+                exp_val = str(p_match.iloc[0].get("expiry", "00"))
+
+        with p2: m_pack = st.text_input("Pack", value=default_pack, key="net_pack")
+        with p3: m_batch = st.text_input("Batch", value=batch_val, key="net_batch")
+        with p4: m_exp = st.text_input("Expiry", value=exp_val, key="net_exp")
         with p5: s_qty = st.number_input("Qty", min_value=1, value=10, key="net_qty")
-        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0, key="net_mrp")
+        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp, key="net_mrp")
         with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=20.0, key="net_disc")
         with p8:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
@@ -480,14 +510,29 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
     else:
         p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.8, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
-        with p1: sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
-        with p2: m_pack = st.text_input("Pack", value="1x10")
-        with p3: m_batch = st.text_input("Batch", value="B001")
-        with p4: m_exp = st.text_input("Expiry", value="12/28")
+        with p1: 
+            sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
+            
+        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty else pd.DataFrame()
+        default_pack = m_row["pack"].values[0] if not m_row.empty else "1x10"
+        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 150.0
+        default_tax = float(m_row["tax"].values[0]) if not m_row.empty else 5.0
+        
+        batch_val = "00"
+        exp_val = "00"
+        if not df_purchases.empty:
+            p_match = df_purchases[df_purchases["product"] == sel_prod]
+            if not p_match.empty:
+                batch_val = str(p_match.iloc[0].get("batch", "00"))
+                exp_val = str(p_match.iloc[0].get("expiry", "00"))
+
+        with p2: m_pack = st.text_input("Pack", value=default_pack)
+        with p3: m_batch = st.text_input("Batch", value=batch_val)
+        with p4: m_exp = st.text_input("Expiry", value=exp_val)
         with p5: s_qty = st.number_input("Qty", min_value=1, value=10)
         with p6: s_deal = st.text_input("Deal", value="NA")
-        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
-        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp)
+        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=default_tax, step=1.0)
         with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
         with p10:
             if s_disc_pct > 0:
@@ -566,7 +611,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         with save_col4:
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
-                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','-')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
+                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','00')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
             wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -576,7 +621,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
 # ==========================================
-# 2. SALES HISTORY (WITH MANAGER REVIEW)
+# 2. SALES HISTORY
 # ==========================================
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
@@ -584,7 +629,6 @@ elif active_tab == "📦 Sales History":
     df_sales = load_transaction_data("sales")
     
     if not df_sales.empty:
-        # If Manager, allow filtering by SR Representative
         if is_manager:
             st.info("👑 **Manager Controls**: Review team cumulative sales or filter by Sales Executive.")
             sr_options = ["All Sales Team (Cumulative)"] + sorted([s for s in df_sales['sr_username'].dropna().unique()])
@@ -592,7 +636,6 @@ elif active_tab == "📦 Sales History":
             if sel_sr != "All Sales Team (Cumulative)":
                 df_sales = df_sales[df_sales['sr_username'] == sel_sr]
         else:
-            # Sales Exec only sees own sales
             df_sales = df_sales[df_sales['sr_username'] == st.session_state['username']]
 
         parties_list = ["All Parties"] + sorted([p for p in df_sales['party'].unique() if p])
@@ -637,7 +680,7 @@ elif active_tab == "📦 Sales History":
         st.info("No Sales records found.")
 
 # ==========================================
-# 3. PURCHASE HISTORY (WITH MANAGER REVIEW)
+# 3. PURCHASE HISTORY
 # ==========================================
 elif active_tab == "📥 Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
@@ -674,7 +717,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
         if selected_inv != "None (Summary View)":
             inv_df = filtered_df[filtered_df['invoice'] == selected_inv]
             p_name = inv_df['party'].iloc[0] if not inv_df.empty else selected_party
-            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_df.empty else ""
+            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_date.empty else ""
             
             st.markdown(f"""
                 <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00; margin-bottom:15px;'>
@@ -696,7 +739,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
         st.info("No Purchase records found.")
 
 # ==========================================
-# 4. MERGED BATCH STOCK & CUMULATIVE REVIEW
+# 4. BATCH STOCK OVERVIEW
 # ==========================================
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch Stock & Cumulative Overview</h2>", unsafe_allow_html=True)
@@ -726,7 +769,7 @@ elif active_tab == "🏭 Batch Stock & Expiry Alert":
                 st.dataframe(df_pur[cols_to_show], use_container_width=True)
             else: st.info("No stock data available.")
             
-        else: # SR-Wise
+        else:
             if not df_pur.empty:
                 sr_select = st.selectbox("Select Sales Representative:", sorted(df_pur['sr_username'].dropna().unique()))
                 sr_stock = df_pur[df_pur['sr_username'] == sr_select]
@@ -734,7 +777,6 @@ elif active_tab == "🏭 Batch Stock & Expiry Alert":
             else: st.info("No stock data available.")
             
     else:
-        # Sales Executive View
         df_pur_sr = df_pur[df_pur['sr_username'] == st.session_state['username']] if not df_pur.empty else pd.DataFrame()
         if not df_pur_sr.empty:
             cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'created_at'] if c in df_pur_sr.columns]
