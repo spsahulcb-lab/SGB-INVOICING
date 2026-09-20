@@ -414,7 +414,7 @@ nav_options = [
     "🤖 AI Smart Scan & Billing",
     "📦 Sales History",
     "📥 Purchase History (Stock In)",
-    "🏭 Batch Stock & Expiry Alert"
+    "🏭 Live Stock & Quantity-Value Summary"
 ]
 
 if is_manager:
@@ -467,7 +467,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     with f3: gst_no = st.text_input("Party GSTIN", value="00")
 
     st.markdown("##### ➕ Manual Item Addition")
-    # NET RATE Mode Option Comes FIRST
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
 
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
@@ -711,48 +710,129 @@ elif active_tab == "📥 Purchase History (Stock In)":
         st.info("No Purchase records found.")
 
 # ==========================================
-# 4. BATCH STOCK OVERVIEW
+# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY
 # ==========================================
-elif active_tab == "🏭 Batch Stock & Expiry Alert":
-    st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch Stock & Cumulative Overview</h2>", unsafe_allow_html=True)
+elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
+    st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock & Quantity-Value Summary</h2>", unsafe_allow_html=True)
     
     df_pur = load_transaction_data("purchase")
     df_sal = load_transaction_data("sales")
     
     if is_manager:
-        st.info("📊 **Manager Review Dashboard**: Viewing merged stock across all Sales Representatives.")
-        view_mode = st.radio("Stock Summary View Mode:", ["Merged Cumulative Product Stock", "Batch-Wise Detailed Inventory", "SR-Wise Individual Stock"], horizontal=True)
+        st.info("📊 **Manager Review Dashboard**: Viewing merged stock and sales value across Sales Representatives.")
+        view_mode = st.radio("Stock Summary View Mode:", ["Merged Cumulative Product Stock", "Batch-Wise Inventory", "SR-Wise Individual Stock Summary"], horizontal=True)
         
+        # 1. MERGED CUMULATIVE PRODUCT STOCK
         if view_mode == "Merged Cumulative Product Stock":
             if not df_pur.empty or not df_sal.empty:
-                pur_summary = df_pur.groupby('product')['qty'].sum().reset_index(name='Total Purchase Qty') if not df_pur.empty else pd.DataFrame(columns=['product', 'Total Purchase Qty'])
-                sal_summary = df_sal.groupby('product')['qty'].sum().reset_index(name='Total Sales Qty') if not df_sal.empty else pd.DataFrame(columns=['product', 'Total Sales Qty'])
+                pur_grp = df_pur.groupby('product').agg(
+                    Purchase_Qty=('qty', 'sum'),
+                    Purchase_Value=('amount', 'sum')
+                ).reset_index() if not df_pur.empty else pd.DataFrame(columns=['product', 'Purchase_Qty', 'Purchase_Value'])
                 
-                merged_stock = pd.merge(pur_summary, sal_summary, on='product', how='outer').fillna(0)
-                merged_stock['Available Net Stock'] = merged_stock['Total Purchase Qty'] - merged_stock['Total Sales Qty']
+                sal_grp = df_sal.groupby('product').agg(
+                    Sales_Qty=('qty', 'sum'),
+                    Sales_Value=('amount', 'sum')
+                ).reset_index() if not df_sal.empty else pd.DataFrame(columns=['product', 'Sales_Qty', 'Sales_Value'])
                 
-                st.dataframe(merged_stock, use_container_width=True)
+                merged = pd.merge(pur_grp, sal_grp, on='product', how='outer').fillna(0)
+                merged['Net Stock Qty'] = merged['Purchase_Qty'] - merged['Sales_Qty']
+                
+                merged['Avg Purchase Rate'] = merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
+                merged['Net Stock Value (₹)'] = merged['Net Stock Qty'] * merged['Avg Purchase Rate']
+                
+                display_df = merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
+                display_df.columns = ['Product', 'Total Purchase Qty', 'Total Purchase Value (₹)', 'Total Sales Qty', 'Total Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
+                
+                display_df['Total Purchase Value (₹)'] = display_df['Total Purchase Value (₹)'].map('₹ {:,.2f}'.format)
+                display_df['Total Sales Value (₹)'] = display_df['Total Sales Value (₹)'].map('₹ {:,.2f}'.format)
+                display_df['Net Stock Value (₹)'] = display_df['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
+                
+                st.dataframe(display_df, use_container_width=True)
             else:
                 st.info("No stock data available.")
         
-        elif view_mode == "Batch-Wise Detailed Inventory":
+        # 2. BATCH-WISE INVENTORY
+        elif view_mode == "Batch-Wise Inventory":
             if not df_pur.empty:
-                cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'created_at', 'sr_username'] if c in df_pur.columns]
+                cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'created_at', 'sr_username'] if c in df_pur.columns]
                 st.dataframe(df_pur[cols_to_show], use_container_width=True)
-            else: st.info("No stock data available.")
+            else: 
+                st.info("No batch stock data available.")
             
+        # 3. SR-WISE INDIVIDUAL STOCK SUMMARY
         else:
-            if not df_pur.empty:
-                sr_select = st.selectbox("Select Sales Representative:", sorted(df_pur['sr_username'].dropna().unique()))
-                sr_stock = df_pur[df_pur['sr_username'] == sr_select]
-                st.dataframe(sr_stock, use_container_width=True)
-            else: st.info("No stock data available.")
+            all_srs = set()
+            if not df_pur.empty and 'sr_username' in df_pur.columns:
+                all_srs.update(df_pur['sr_username'].dropna().unique())
+            if not df_sal.empty and 'sr_username' in df_sal.columns:
+                all_srs.update(df_sal['sr_username'].dropna().unique())
+                
+            sr_list = sorted(list(all_srs))
+            
+            if sr_list:
+                selected_sr = st.selectbox("👤 Select Sales Representative:", sr_list)
+                
+                sr_pur = df_pur[df_pur['sr_username'] == selected_sr] if not df_pur.empty and 'sr_username' in df_pur.columns else pd.DataFrame()
+                sr_sal = df_sal[df_sal['sr_username'] == selected_sr] if not df_sal.empty and 'sr_username' in df_sal.columns else pd.DataFrame()
+                
+                if not sr_pur.empty or not sr_sal.empty:
+                    p_grp = sr_pur.groupby('product').agg(
+                        Purchase_Qty=('qty', 'sum'),
+                        Purchase_Value=('amount', 'sum')
+                    ).reset_index() if not sr_pur.empty else pd.DataFrame(columns=['product', 'Purchase_Qty', 'Purchase_Value'])
+                    
+                    s_grp = sr_sal.groupby('product').agg(
+                        Sales_Qty=('qty', 'sum'),
+                        Sales_Value=('amount', 'sum')
+                    ).reset_index() if not sr_sal.empty else pd.DataFrame(columns=['product', 'Sales_Qty', 'Sales_Value'])
+                    
+                    sr_merged = pd.merge(p_grp, s_grp, on='product', how='outer').fillna(0)
+                    sr_merged['Net Stock Qty'] = sr_merged['Purchase_Qty'] - sr_merged['Sales_Qty']
+                    
+                    sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
+                    sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
+                    
+                    sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
+                    sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
+                    
+                    sr_display['Purchase Value (₹)'] = sr_display['Purchase Value (₹)'].map('₹ {:,.2f}'.format)
+                    sr_display['Sales Value (₹)'] = sr_display['Sales Value (₹)'].map('₹ {:,.2f}'.format)
+                    sr_display['Net Stock Value (₹)'] = sr_display['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
+                    
+                    st.subheader(f"📋 Product Summary for {selected_sr}")
+                    st.dataframe(sr_display, use_container_width=True)
+                else:
+                    st.info(f"No records found for Sales Executive '{selected_sr}'.")
+            else:
+                st.info("No Sales Representative data available.")
             
     else:
-        df_pur_sr = df_pur[df_pur['sr_username'] == st.session_state['username']] if not df_pur.empty else pd.DataFrame()
-        if not df_pur_sr.empty:
-            cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'created_at'] if c in df_pur_sr.columns]
-            st.dataframe(df_pur_sr[cols_to_show], use_container_width=True)
+        # SALES EXECUTIVE SELF VIEW
+        sr_user = st.session_state['username']
+        sr_pur = df_pur[df_pur['sr_username'] == sr_user] if not df_pur.empty and 'sr_username' in df_pur.columns else pd.DataFrame()
+        sr_sal = df_sal[df_sal['sr_username'] == sr_user] if not df_sal.empty and 'sr_username' in df_sal.columns else pd.DataFrame()
+        
+        if not sr_pur.empty or not sr_sal.empty:
+            p_grp = sr_pur.groupby('product').agg(
+                Purchase_Qty=('qty', 'sum'),
+                Purchase_Value=('amount', 'sum')
+            ).reset_index() if not sr_pur.empty else pd.DataFrame(columns=['product', 'Purchase_Qty', 'Purchase_Value'])
+            
+            s_grp = sr_sal.groupby('product').agg(
+                Sales_Qty=('qty', 'sum'),
+                Sales_Value=('amount', 'sum')
+            ).reset_index() if not sr_sal.empty else pd.DataFrame(columns=['product', 'Sales_Qty', 'Sales_Value'])
+            
+            sr_merged = pd.merge(p_grp, s_grp, on='product', how='outer').fillna(0)
+            sr_merged['Net Stock Qty'] = sr_merged['Purchase_Qty'] - sr_merged['Sales_Qty']
+            sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
+            sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
+            
+            sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
+            sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
+            
+            st.dataframe(sr_display, use_container_width=True)
         else:
             st.info("No Stock data available for your ID.")
 
