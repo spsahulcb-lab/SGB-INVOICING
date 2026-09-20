@@ -43,6 +43,13 @@ def init_local_db():
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
+    # Auto-add missing columns to old table structure if exists
+    for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
+        try:
+            c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
+        except Exception:
+            pass  # Column already exists
+    
     # Default Users
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
@@ -61,7 +68,10 @@ def init_local_db():
         ("Alobyd-P", "1x10", 95.0, 45.0, 12.0)
     ]
     for p in defaults:
-        c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
+        try:
+            c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
+        except Exception:
+            pass
         
     conn.commit()
     conn.close()
@@ -264,7 +274,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             raw_prod = str(item.get("PRODUCT", "")).strip()
             corrected_prod = auto_correct_brand(raw_prod, master_list)
             
-            # Match master details if exact match
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
