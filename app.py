@@ -61,22 +61,6 @@ def init_local_db():
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
-    defaults = [
-        ("ATPLEX Syrup", "200ml", 145.0, 75.0, 12.0),
-        ("Duty Beauty MINUS 16 Cream", "50gm", 450.0, 220.0, 18.0),
-        ("Duty Beauty Glutathione Soap", "75gm", 195.0, 95.0, 18.0),
-        ("Duty Beauty Facewash", "100ml", 220.0, 110.0, 18.0),
-        ("Kabja Band", "100gm", 120.0, 60.0, 12.0),
-        ("Cartibot", "1x10", 350.0, 180.0, 12.0),
-        ("Virload", "1x10", 280.0, 140.0, 12.0),
-        ("Womensa Syrup", "200ml", 160.0, 80.0, 12.0),
-        ("Panchaliv Syrup", "200ml", 135.0, 68.0, 12.0),
-        ("Alobyd-P", "1x10", 95.0, 45.0, 12.0)
-    ]
-    for p in defaults:
-        try: c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
-        except Exception: pass
-        
     conn.commit()
     conn.close()
 
@@ -140,7 +124,7 @@ def bulk_upload_master_products(records):
     c = conn.cursor()
     for item in records:
         c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", 
-                  (item["product_name"], item.get("pack", ""), item.get("mrp", 0.0), item.get("rate", 0.0), item.get("tax", 12.0)))
+                  (item["product_name"], item.get("pack", "1x10"), item.get("mrp", 0.0), item.get("rate", 0.0), item.get("tax", 5.0)))
     conn.commit()
     conn.close()
 
@@ -153,12 +137,12 @@ def sync_entire_master_products(edited_df):
     for _, r in edited_df.iterrows():
         p_name = str(r.get("product_name", "")).strip()
         if p_name and p_name.lower() != "nan":
-            pack = str(r.get("pack", ""))
+            pack = str(r.get("pack", "1x10"))
             mrp = clean_float(r.get("mrp"), 0.0)
-            rate = clean_float(r.get("rate"), 0.0)
-            tax = clean_float(r.get("tax"), 12.0)
+            tax = clean_float(r.get("tax"), 5.0)
+            rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
             
-            c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+            c.execute("INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
                       (p_name, pack, mrp, rate, tax))
             records.append({"product_name": p_name, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax})
             
@@ -186,14 +170,14 @@ def save_transaction_data(table_name, items, invoice, party):
             "invoice": invoice,
             "party": party,
             "product": row.get('PRODUCT', ''),
-            "pack": row.get('PACK', ''),
+            "pack": row.get('PACK', '1x10'),
             "qty": float(row.get('QTY', 0)),
             "free_qty": str(row.get('DEAL/FREE', '')),
             "mrp": float(row.get('MRP', 0)),
             "disc_pct": float(row.get('DISC (%)', 0)),
             "disc_rs": float(row.get('DISC (₹)', 0)),
             "rate": float(row.get('RATE', 0)),
-            "gst": float(row.get('GST', 0)),
+            "gst": float(row.get('GST', 5.0)),
             "amount": float(row.get('AMOUNT', 0)),
             "created_at": today
         })
@@ -287,7 +271,7 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
         JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12.0}}
+          {{"PRODUCT": "Item Name", "PACK": "1x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
         ]
         """
         if uploaded_file:
@@ -309,7 +293,7 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             corrected_prod = auto_correct_brand(raw_prod, master_list)
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
-            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
+            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "1x10")
             qty = clean_float(item.get("QTY"), default=1.0)
             deal = str(item.get("DEAL", "NA"))
             
@@ -320,20 +304,14 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             disc_pct = clean_float(item.get("DISC_PCT"), default=0.0)
             disc_rs = clean_float(item.get("DISC_RS"), default=0.0)
 
+            gst = clean_float(item.get("GST"), default=5.0)
             rate = clean_float(item.get("RATE"), default=0.0)
-            if rate == 0.0 and not m_match.empty:
-                rate = clean_float(m_match["rate"].values[0])
-            
-            if disc_pct > 0 or disc_rs > 0:
-                gst = 0.0
-            else:
-                gst = clean_float(item.get("GST"), default=12.0)
             
             if rate == 0.0 and mrp > 0:
                 if disc_pct > 0:
                     rate = round(mrp * (1 - (disc_pct / 100.0)), 2)
                 else:
-                    rate = round((mrp * 80.0) / 118.0, 2) if gst == 18.0 else round((mrp * 80.0) / 105.0, 2)
+                    rate = round((mrp * 80.0) / (100.0 + gst), 2)
                 
             eff_rate = rate - disc_rs
             if disc_pct > 0 and disc_rs == 0:
@@ -386,7 +364,7 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, su
     pdf.set_font("Helvetica", '', 8)
     for row in cart_data:
         pdf.cell(45, 6, str(row['PRODUCT'])[:22], 1)
-        pdf.cell(15, 6, str(row.get('PACK', ''))[:8], 1)
+        pdf.cell(15, 6, str(row.get('PACK', '1x10'))[:8], 1)
         pdf.cell(15, 6, str(row['QTY']), 1)
         pdf.cell(15, 6, str(row.get('DEAL/FREE', '')), 1)
         pdf.cell(20, 6, f"{float(row['MRP']):.2f}", 1)
@@ -482,7 +460,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
         p1, p2, p3, p4, p5, p6 = st.columns([2.5, 1, 1, 1.2, 1.2, 1])
         with p1: sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST if MASTER_LIST else ["Select Product"])
-        with p2: m_pack = st.text_input("Pack", value="10x10", key="net_pack")
+        with p2: m_pack = st.text_input("Pack", value="1x10", key="net_pack")
         with p3: s_qty = st.number_input("Qty", min_value=1, value=10, key="net_qty")
         with p4: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0, key="net_mrp")
         with p5: s_disc_pct = st.number_input("Discount % (on MRP)", min_value=0.0, max_value=100.0, value=20.0, key="net_disc")
@@ -500,22 +478,24 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     else:
         p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
         with p1: sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
-        with p2: m_pack = st.text_input("Pack", value="10x10")
+        with p2: m_pack = st.text_input("Pack", value="1x10")
         with p3: s_qty = st.number_input("Qty", min_value=1, value=10)
         with p4: s_deal = st.text_input("Deal/Free", value="NA")
         with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
-        with p6: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-        with p7: s_disc_rs = st.number_input("Disc (₹)", min_value=0.0, value=0.0)
+        with p6: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+        with p7: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
         with p8:
-            auto_gst = 0.0 if (s_disc_pct > 0 or s_disc_rs > 0) else 12.0
-            calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)) - s_disc_rs, 2)
+            if s_disc_pct > 0:
+                calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+            else:
+                calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
             st.write(f"**Rate:** ₹{calc_rate}")
             if st.button("➕ Add Item"):
                 amt = float(s_qty) * calc_rate
                 st.session_state["scanned_cart"].append({
                     "PRODUCT": sel_prod, "PACK": m_pack, "QTY": float(s_qty), "DEAL/FREE": s_deal,
-                    "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": float(s_disc_rs),
-                    "RATE": calc_rate, "GST": auto_gst, "AMOUNT": round(amt, 2)
+                    "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                    "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
 
@@ -649,10 +629,12 @@ elif active_tab == "🏷️ Manage Master Products":
     with m_col1:
         st.markdown("### ➕ Add Single Product")
         p_name = st.text_input("Product Name")
-        p_pack = st.text_input("Pack Size", value="10x10")
+        p_pack = st.text_input("Pack Size", value="1x10")
+        p_tax = st.number_input("Tax / GST (%)", value=5.0, step=1.0)
         p_mrp = st.number_input("MRP (₹)", value=100.0)
-        p_rate = st.number_input("Rate (₹)", value=50.0)
-        p_tax = st.number_input("Tax / GST (%)", value=12.0)
+        
+        calc_auto_rate = round((p_mrp * 80.0) / (100.0 + p_tax), 2)
+        p_rate = st.number_input("Rate (₹)", value=calc_auto_rate)
         
         if st.button("➕ Add Product to Master"):
             if p_name:
@@ -694,12 +676,16 @@ elif active_tab == "🏷️ Manage Master Products":
                     for _, r in df_up.iterrows():
                         p_val = str(r[c_prod]).strip()
                         if p_val and p_val.lower() != 'nan':
+                            mrp_v = clean_float(r[c_mrp]) if c_mrp != "None" else 0.0
+                            tax_v = clean_float(r[c_tax], default=5.0) if c_tax != "None" else 5.0
+                            rate_v = clean_float(r[c_rate]) if c_rate != "None" else round((mrp_v * 80.0) / (100.0 + tax_v), 2)
+                            
                             records.append({
                                 "product_name": p_val,
-                                "pack": str(r[c_pack]) if c_pack != "None" else "",
-                                "mrp": clean_float(r[c_mrp]) if c_mrp != "None" else 0.0,
-                                "rate": clean_float(r[c_rate]) if c_rate != "None" else 0.0,
-                                "tax": clean_float(r[c_tax], default=12.0) if c_tax != "None" else 12.0
+                                "pack": str(r[c_pack]) if c_pack != "None" else "1x10",
+                                "mrp": mrp_v,
+                                "rate": rate_v,
+                                "tax": tax_v
                             })
                     bulk_upload_master_products(records)
                     st.success(f"✅ Successfully imported {len(records)} products!")
@@ -709,7 +695,7 @@ elif active_tab == "🏷️ Manage Master Products":
 
     with m_col2:
         st.markdown("### 📋 Editable Master Products Database")
-        st.info("💡 **Tips:** Double-click any cell to edit. Add/Delete rows directly in table. Click 'Save Database Changes' to apply.")
+        st.info("💡 **Tips:** Double-click any cell to edit. Select row and press Delete or click 'Save Database Changes' to delete permanently.")
         
         m_df = load_master_products()
         display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
@@ -733,5 +719,5 @@ elif active_tab == "🏷️ Manage Master Products":
         if st.button("❌ Delete Product"):
             if del_p != "None":
                 delete_master_product(del_p)
-                st.success(f"Product '{del_p}' deleted.")
+                st.success(f"Product '{del_p}' permanently deleted from database.")
                 st.rerun()
