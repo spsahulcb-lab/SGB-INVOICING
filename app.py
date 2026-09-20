@@ -120,7 +120,7 @@ def sync_entire_master_products(edited_df):
     for _, r in edited_df.iterrows():
         p_name = str(r.get("product_name", "")).strip()
         if p_name and p_name.lower() != "nan":
-            pack = str(r.get("pack", "1x10"))
+            pack = str(r.get("pack", "00"))
             mrp = clean_float(r.get("mrp"), 0.0)
             tax = clean_float(r.get("tax"), 5.0)
             rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
@@ -153,11 +153,11 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
             "invoice": invoice,
             "party": party,
             "product": row.get('PRODUCT', ''),
-            "pack": row.get('PACK', '1x10'),
+            "pack": row.get('PACK', '00'),
             "batch": str(row.get('BATCH', '00')),
             "expiry": str(row.get('EXPIRY', '00')),
             "qty": float(row.get('QTY', 0)),
-            "free_qty": str(row.get('DEAL/FREE', '')),
+            "free_qty": str(row.get('DEAL/FREE', '00')),
             "mrp": float(row.get('MRP', 0)),
             "disc_pct": float(row.get('DISC (%)', 0)),
             "disc_rs": float(row.get('DISC (₹)', 0)),
@@ -239,7 +239,6 @@ def clean_float(val, default=0.0):
         except ValueError: return default
     return default
 
-# Helper to get existing parties list
 def get_existing_parties():
     sales_df = load_transaction_data("sales")
     pur_df = load_transaction_data("purchase")
@@ -265,7 +264,7 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
         JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "1x10", "BATCH": "00", "EXPIRY": "00", "QTY": 10, "DEAL": "NA", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
+          {{"PRODUCT": "Item Name", "PACK": "00", "BATCH": "00", "EXPIRY": "00", "QTY": 0, "DEAL": "00", "MRP": 0.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 0.0, "GST": 5.0}}
         ]
         """
         if uploaded_file:
@@ -287,11 +286,11 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             corrected_prod = auto_correct_brand(raw_prod, master_list)
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
-            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "1x10")
+            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "00")
             batch = str(item.get("BATCH", "00"))
             expiry = str(item.get("EXPIRY", "00"))
-            qty = clean_float(item.get("QTY"), default=1.0)
-            deal = str(item.get("DEAL", "NA"))
+            qty = clean_float(item.get("QTY"), default=0.0)
+            deal = str(item.get("DEAL", "00"))
             
             mrp = clean_float(item.get("MRP"), default=0.0)
             if mrp == 0.0 and not m_match.empty:
@@ -363,7 +362,7 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, su
     pdf.set_font("Helvetica", '', 8)
     for row in cart_data:
         pdf.cell(35, 6, str(row['PRODUCT'])[:18], 1)
-        pdf.cell(12, 6, str(row.get('PACK', '1x10'))[:6], 1)
+        pdf.cell(12, 6, str(row.get('PACK', '00'))[:6], 1)
         pdf.cell(15, 6, str(row.get('BATCH', '00'))[:8], 1)
         pdf.cell(12, 6, str(row.get('EXPIRY', '00'))[:6], 1)
         pdf.cell(12, 6, str(row['QTY']), 1)
@@ -388,7 +387,7 @@ if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
 
 USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
-MASTER_LIST = MASTER_DF["product_name"].tolist() if not MASTER_DF.empty else []
+MASTER_LIST = ["00"] + (MASTER_DF["product_name"].tolist() if not MASTER_DF.empty else [])
 
 if not st.session_state["logged_in"]:
     st.markdown("<h2 class='main-header'>🍊 SGB / LCB Pharma Wholesale ERP</h2>", unsafe_allow_html=True)
@@ -462,40 +461,26 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         if party_mode == "Select Saved Party" and existing_parties:
             party_name = st.selectbox("Select Party / Medical Store", existing_parties)
         else:
-            party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
+            party_name = st.text_input("Party / Supplier / Medical Store Name", value="00")
             
     with f2: inv_no = st.text_input("Invoice No", value="00")
     with f3: gst_no = st.text_input("Party GSTIN", value="00")
 
     st.markdown("##### ➕ Manual Item Addition")
-    rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["Gross Rate Mode (With GST)", "NET RATE Mode (GST Excluded / 0%)"], horizontal=True)
-
-    df_purchases = load_transaction_data("purchase")
+    # NET RATE Mode Option Comes FIRST
+    rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
 
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
         p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
         with p1: 
-            sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST if MASTER_LIST else ["Select Product"])
+            sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST, index=0)
             
-        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty else pd.DataFrame()
-        default_pack = m_row["pack"].values[0] if not m_row.empty else "1x10"
-        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 150.0
-        default_tax = float(m_row["tax"].values[0]) if not m_row.empty else 5.0
-        
-        batch_val = "00"
-        exp_val = "00"
-        if not df_purchases.empty:
-            p_match = df_purchases[df_purchases["product"] == sel_prod]
-            if not p_match.empty:
-                batch_val = str(p_match.iloc[0].get("batch", "00"))
-                exp_val = str(p_match.iloc[0].get("expiry", "00"))
-
-        with p2: m_pack = st.text_input("Pack", value=default_pack, key="net_pack")
-        with p3: m_batch = st.text_input("Batch", value=batch_val, key="net_batch")
-        with p4: m_exp = st.text_input("Expiry", value=exp_val, key="net_exp")
-        with p5: s_qty = st.number_input("Qty", min_value=1, value=10, key="net_qty")
-        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp, key="net_mrp")
-        with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=20.0, key="net_disc")
+        with p2: m_pack = st.text_input("Pack", value="00", key="net_pack")
+        with p3: m_batch = st.text_input("Batch", value="00", key="net_batch")
+        with p4: m_exp = st.text_input("Expiry", value="00", key="net_exp")
+        with p5: s_qty = st.number_input("Qty", min_value=0, value=0, key="net_qty")
+        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0, key="net_mrp")
+        with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
         with p8:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             st.write(f"**Net Rate:** ₹{calc_net_rate}")
@@ -503,7 +488,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 amt = float(s_qty) * calc_net_rate
                 st.session_state["scanned_cart"].append({
                     "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                    "QTY": float(s_qty), "DEAL/FREE": "NA", "MRP": float(s_mrp),
+                    "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
                     "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
                     "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                 })
@@ -511,28 +496,15 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     else:
         p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.8, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
         with p1: 
-            sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
-            
-        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty else pd.DataFrame()
-        default_pack = m_row["pack"].values[0] if not m_row.empty else "1x10"
-        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 150.0
-        default_tax = float(m_row["tax"].values[0]) if not m_row.empty else 5.0
-        
-        batch_val = "00"
-        exp_val = "00"
-        if not df_purchases.empty:
-            p_match = df_purchases[df_purchases["product"] == sel_prod]
-            if not p_match.empty:
-                batch_val = str(p_match.iloc[0].get("batch", "00"))
-                exp_val = str(p_match.iloc[0].get("expiry", "00"))
+            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
 
-        with p2: m_pack = st.text_input("Pack", value=default_pack)
-        with p3: m_batch = st.text_input("Batch", value=batch_val)
-        with p4: m_exp = st.text_input("Expiry", value=exp_val)
-        with p5: s_qty = st.number_input("Qty", min_value=1, value=10)
-        with p6: s_deal = st.text_input("Deal", value="NA")
-        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp)
-        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=default_tax, step=1.0)
+        with p2: m_pack = st.text_input("Pack", value="00")
+        with p3: m_batch = st.text_input("Batch", value="00")
+        with p4: m_exp = st.text_input("Expiry", value="00")
+        with p5: s_qty = st.number_input("Qty", min_value=0, value=0)
+        with p6: s_deal = st.text_input("Deal", value="00")
+        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0)
+        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
         with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
         with p10:
             if s_disc_pct > 0:
@@ -824,9 +796,9 @@ elif active_tab == "🏷️ Manage Master Products":
     with m_col1:
         st.markdown("### ➕ Add Single Product")
         p_name = st.text_input("Product Name")
-        p_pack = st.text_input("Pack Size", value="1x10")
+        p_pack = st.text_input("Pack Size", value="00")
         p_tax = st.number_input("Tax / GST (%)", value=5.0, step=1.0)
-        p_mrp = st.number_input("MRP (₹)", value=100.0)
+        p_mrp = st.number_input("MRP (₹)", value=0.0)
         
         calc_auto_rate = round((p_mrp * 80.0) / (100.0 + p_tax), 2)
         p_rate = st.number_input("Rate (₹)", value=calc_auto_rate)
