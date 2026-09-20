@@ -477,16 +477,32 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("##### ➕ Manual Item Addition")
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
 
+    df_purchases = load_transaction_data("purchase")
+
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
         p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
         with p1: 
             sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST, index=0)
             
-        with p2: m_pack = st.text_input("Pack", value="00", key="net_pack")
-        with p3: m_batch = st.text_input("Batch", value="00", key="net_batch")
-        with p4: m_exp = st.text_input("Expiry", value="00", key="net_exp")
+        # Default values from Master
+        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty and sel_prod != "00" else pd.DataFrame()
+        default_pack = str(m_row["pack"].values[0]) if not m_row.empty else "00"
+        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 0.0
+
+        # Default batch and expiry from Purchase Stock if available
+        batch_val = "00"
+        exp_val = "00"
+        if not df_purchases.empty and sel_prod != "00":
+            p_match = df_purchases[df_purchases["product"] == sel_prod]
+            if not p_match.empty:
+                batch_val = str(p_match.iloc[0].get("batch", "00"))
+                exp_val = str(p_match.iloc[0].get("expiry", "00"))
+
+        with p2: m_pack = st.text_input("Pack", value=default_pack, key="net_pack")
+        with p3: m_batch = st.text_input("Batch", value=batch_val, key="net_batch")
+        with p4: m_exp = st.text_input("Expiry", value=exp_val, key="net_exp")
         with p5: s_qty = st.number_input("Qty", min_value=0, value=0, key="net_qty")
-        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0, key="net_mrp")
+        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp, key="net_mrp")
         with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
         with p8:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
@@ -505,19 +521,37 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         with p1: 
             sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
 
-        with p2: m_pack = st.text_input("Pack", value="00")
-        with p3: m_batch = st.text_input("Batch", value="00")
-        with p4: m_exp = st.text_input("Expiry", value="00")
+        # Default values from Master
+        m_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod] if not MASTER_DF.empty and sel_prod != "00" else pd.DataFrame()
+        default_pack = str(m_row["pack"].values[0]) if not m_row.empty else "00"
+        default_mrp = float(m_row["mrp"].values[0]) if not m_row.empty else 0.0
+        default_tax = float(m_row["tax"].values[0]) if not m_row.empty else 5.0
+
+        # Default batch and expiry from Purchase Stock if available
+        batch_val = "00"
+        exp_val = "00"
+        if not df_purchases.empty and sel_prod != "00":
+            p_match = df_purchases[df_purchases["product"] == sel_prod]
+            if not p_match.empty:
+                batch_val = str(p_match.iloc[0].get("batch", "00"))
+                exp_val = str(p_match.iloc[0].get("expiry", "00"))
+
+        with p2: m_pack = st.text_input("Pack", value=default_pack)
+        with p3: m_batch = st.text_input("Batch", value=batch_val)
+        with p4: m_exp = st.text_input("Expiry", value=exp_val)
         with p5: s_qty = st.number_input("Qty", min_value=0, value=0)
         with p6: s_deal = st.text_input("Deal", value="00")
-        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0)
-        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp)
+        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=default_tax, step=1.0)
         with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
         with p10:
             if s_disc_pct > 0:
                 calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             else:
-                calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
+                # Formula requested: rate = mrp * 80 / (100 + gst)
+                denominator = 100.0 + s_gst_rate if s_gst_rate > 0 else 105.0
+                calc_rate = round((s_mrp * 80.0) / denominator, 2)
+                
             st.write(f"**Rate:** ₹{calc_rate}")
             if st.button("➕ Add Item"):
                 amt = float(s_qty) * calc_rate
@@ -771,7 +805,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 merged['Avg Purchase Rate'] = merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                 merged['Net Stock Value (₹)'] = merged['Net Stock Qty'] * merged['Avg Purchase Rate']
                 
-                # Grand Totals Row Calculation
                 tot_p_qty = merged['Purchase_Qty'].sum()
                 tot_p_val = merged['Purchase_Value'].sum()
                 tot_s_qty = merged['Sales_Qty'].sum()
@@ -782,14 +815,12 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 display_df = merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                 display_df.columns = ['Product', 'Total Purchase Qty', 'Total Purchase Value (₹)', 'Total Sales Qty', 'Total Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                 
-                # Format Monetary values for display
                 display_df['Total Purchase Value (₹)'] = display_df['Total Purchase Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Total Sales Value (₹)'] = display_df['Total Sales Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Net Stock Value (₹)'] = display_df['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
                 
                 st.dataframe(display_df, use_container_width=True)
                 
-                # Display Grand Total Metric Box
                 st.markdown("---")
                 st.markdown("### 📊 Grand Total Summary")
                 t1, t2, t3 = st.columns(3)
