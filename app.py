@@ -1,10 +1,10 @@
-import streamlit as st
+import sqlite3
 import pandas as pd
+import streamlit as st
 from datetime import datetime
 from fpdf import FPDF
 import urllib.parse
 import json
-import sqlite3
 import re
 import difflib
 import google.generativeai as genai
@@ -36,23 +36,22 @@ def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Create tables if not exist
+    # Create tables if not exist (including sr_username column)
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT, sr_username TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT, sr_username TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
-    # Auto Migration for Batch & Expiry in sales & purchase tables
+    # Auto Migration for sr_username, batch, expiry
     for tbl in ["sales", "purchase"]:
-        for col, dtype in [("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
+        for col, dtype in [("sr_username", "TEXT"), ("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
             except Exception: pass
             
-    # Auto Migration for master_products
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
         except Exception: pass
@@ -115,19 +114,6 @@ def delete_master_product(product_name):
     conn.commit()
     conn.close()
 
-def bulk_upload_master_products(records):
-    if supabase:
-        try: supabase.table("master_products").insert(records).execute()
-        except Exception: pass
-            
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    for item in records:
-        c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", 
-                  (item["product_name"], item.get("pack", "1x10"), item.get("mrp", 0.0), item.get("rate", 0.0), item.get("tax", 5.0)))
-    conn.commit()
-    conn.close()
-
 def sync_entire_master_products(edited_df):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -162,7 +148,7 @@ def auto_correct_brand(scanned_name, master_list):
     matches = difflib.get_close_matches(scanned_name, master_list, n=1, cutoff=0.65)
     return matches[0] if matches else scanned_name.strip()
 
-def save_transaction_data(table_name, items, invoice, party):
+def save_transaction_data(table_name, items, invoice, party, sr_username):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     records = []
     for row in items:
@@ -181,7 +167,8 @@ def save_transaction_data(table_name, items, invoice, party):
             "rate": float(row.get('RATE', 0)),
             "gst": float(row.get('GST', 5.0)),
             "amount": float(row.get('AMOUNT', 0)),
-            "created_at": today
+            "created_at": today,
+            "sr_username": sr_username
         })
     
     if supabase:
@@ -191,9 +178,9 @@ def save_transaction_data(table_name, items, invoice, party):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for r in records:
-        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, batch, expiry, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (r["invoice"], r["party"], r["product"], r["pack"], r["batch"], r["expiry"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"]))
+        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, batch, expiry, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at, sr_username)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (r["invoice"], r["party"], r["product"], r["pack"], r["batch"], r["expiry"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"], r["sr_username"]))
     conn.commit()
     conn.close()
 
@@ -414,6 +401,8 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 logged_user = st.session_state["logged_user"]
+is_manager = logged_user["role"] == "Manager"
+
 st.sidebar.title(f"🍊 {logged_user['name']}")
 st.sidebar.caption(f"Role: {logged_user['role']}")
 
@@ -424,7 +413,7 @@ nav_options = [
     "🏭 Batch Stock & Expiry Alert"
 ]
 
-if logged_user["role"] == "Manager":
+if is_manager:
     nav_options.append("👥 User Management (Admin)")
     nav_options.append("🏷️ Manage Master Products")
 
@@ -435,6 +424,9 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state["scanned_cart"] = []
     st.rerun()
 
+# ==========================================
+# 1. AI SMART SCAN & BILLING
+# ==========================================
 if active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
     
@@ -451,7 +443,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     st.success(f"✅ Successfully Extracted {len(items)} Items!")
                     st.rerun()
                 else:
-                    st.error("❌ Could not extract items. Please make sure image is readable or try pasting bill text.")
+                    st.error("❌ Could not extract items.")
         else: st.warning("Please upload a slip image or paste text.")
 
     st.markdown("---")
@@ -536,7 +528,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         if not edited_df.empty:
             sub_total = float(edited_df["AMOUNT"].sum())
             total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
-            
             gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
             net_val = (sub_total - extra_bill_disc) + gst_val
         else:
@@ -554,14 +545,14 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         with save_col1:
             if st.button("📤 Save SALES"):
-                save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name)
+                save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name, st.session_state["username"])
                 st.success("✅ Saved to Sales Database!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
         with save_col2:
             if st.button("📥 Save PURCHASE"):
-                save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name)
+                save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name, st.session_state["username"])
                 st.success("✅ Saved to Purchase Database!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
@@ -575,7 +566,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         with save_col4:
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
-                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','-')}, Exp:{row.get('EXPIRY','-')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
+                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','-')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
             wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -584,12 +575,26 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.session_state["scanned_cart"] = []
                 st.rerun()
 
+# ==========================================
+# 2. SALES HISTORY (WITH MANAGER REVIEW)
+# ==========================================
 elif active_tab == "📦 Sales History":
-    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register (Party Statement)</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
     
     df_sales = load_transaction_data("sales")
     
     if not df_sales.empty:
+        # If Manager, allow filtering by SR Representative
+        if is_manager:
+            st.info("👑 **Manager Controls**: Review team cumulative sales or filter by Sales Executive.")
+            sr_options = ["All Sales Team (Cumulative)"] + sorted([s for s in df_sales['sr_username'].dropna().unique()])
+            sel_sr = st.selectbox("👤 Select Sales Executive / Team View:", sr_options)
+            if sel_sr != "All Sales Team (Cumulative)":
+                df_sales = df_sales[df_sales['sr_username'] == sel_sr]
+        else:
+            # Sales Exec only sees own sales
+            df_sales = df_sales[df_sales['sr_username'] == st.session_state['username']]
+
         parties_list = ["All Parties"] + sorted([p for p in df_sales['party'].unique() if p])
         selected_party = st.selectbox("🏬 Select Party to View Statement:", parties_list)
         
@@ -619,24 +624,36 @@ elif active_tab == "📦 Sales History":
                 </div>
             """, unsafe_allow_html=True)
             
-            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'disc_pct', 'disc_rs', 'rate', 'gst', 'amount'] if c in inv_df.columns]
+            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'rate', 'gst', 'amount', 'sr_username'] if c in inv_df.columns]
             st.dataframe(inv_df[display_cols], use_container_width=True)
             
             inv_subtotal = inv_df['amount'].sum() if 'amount' in inv_df.columns else 0.0
             st.markdown(f"#### **Grand Total for {selected_inv}: ₹ {inv_subtotal:,.2f}**")
         else:
             st.subheader(f"📋 Sales Summary Statement ({selected_party})")
-            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'gst', 'amount'] if c in filtered_df.columns]
+            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'sr_username'] if c in filtered_df.columns]
             st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Sales records found in database.")
+        st.info("No Sales records found.")
 
+# ==========================================
+# 3. PURCHASE HISTORY (WITH MANAGER REVIEW)
+# ==========================================
 elif active_tab == "📥 Purchase History (Stock In)":
-    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register (Party Statement)</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
     
     df_purchase = load_transaction_data("purchase")
     
     if not df_purchase.empty:
+        if is_manager:
+            st.info("👑 **Manager Controls**: Review team cumulative purchases or filter by Sales Executive.")
+            sr_options = ["All Sales Team (Cumulative)"] + sorted([s for s in df_purchase['sr_username'].dropna().unique()])
+            sel_sr = st.selectbox("👤 Select Sales Executive / Team View:", sr_options)
+            if sel_sr != "All Sales Team (Cumulative)":
+                df_purchase = df_purchase[df_purchase['sr_username'] == sel_sr]
+        else:
+            df_purchase = df_purchase[df_purchase['sr_username'] == st.session_state['username']]
+
         parties_list = ["All Suppliers/Parties"] + sorted([p for p in df_purchase['party'].unique() if p])
         selected_party = st.selectbox("🏬 Select Supplier / Party to View Purchase Statement:", parties_list)
         
@@ -666,27 +683,68 @@ elif active_tab == "📥 Purchase History (Stock In)":
                 </div>
             """, unsafe_allow_html=True)
             
-            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'disc_pct', 'disc_rs', 'rate', 'gst', 'amount'] if c in inv_df.columns]
+            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'rate', 'gst', 'amount', 'sr_username'] if c in inv_df.columns]
             st.dataframe(inv_df[display_cols], use_container_width=True)
             
             inv_subtotal = inv_df['amount'].sum() if 'amount' in inv_df.columns else 0.0
             st.markdown(f"#### **Grand Total for Purchase Bill ({selected_inv}): ₹ {inv_subtotal:,.2f}**")
         else:
             st.subheader(f"📋 Purchase Summary Statement ({selected_party})")
-            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'gst', 'amount'] if c in filtered_df.columns]
+            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'sr_username'] if c in filtered_df.columns]
             st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Purchase records found in database.")
+        st.info("No Purchase records found.")
 
+# ==========================================
+# 4. MERGED BATCH STOCK & CUMULATIVE REVIEW
+# ==========================================
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
-    st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch Stock & Expiry Overview</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch Stock & Cumulative Overview</h2>", unsafe_allow_html=True)
+    
     df_pur = load_transaction_data("purchase")
-    if not df_pur.empty:
-        cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'rate', 'created_at'] if c in df_pur.columns]
-        st.dataframe(df_pur[cols_to_show], use_container_width=True)
+    df_sal = load_transaction_data("sales")
+    
+    if is_manager:
+        st.info("📊 **Manager Review Dashboard**: Viewing merged stock across all Sales Representatives.")
+        view_mode = st.radio("Stock Summary View Mode:", ["Merged Cumulative Product Stock", "Batch-Wise Detailed Inventory", "SR-Wise Individual Stock"], horizontal=True)
+        
+        if view_mode == "Merged Cumulative Product Stock":
+            if not df_pur.empty or not df_sal.empty:
+                pur_summary = df_pur.groupby('product')['qty'].sum().reset_index(name='Total Purchase Qty') if not df_pur.empty else pd.DataFrame(columns=['product', 'Total Purchase Qty'])
+                sal_summary = df_sal.groupby('product')['qty'].sum().reset_index(name='Total Sales Qty') if not df_sal.empty else pd.DataFrame(columns=['product', 'Total Sales Qty'])
+                
+                merged_stock = pd.merge(pur_summary, sal_summary, on='product', how='outer').fillna(0)
+                merged_stock['Available Net Stock'] = merged_stock['Total Purchase Qty'] - merged_stock['Total Sales Qty']
+                
+                st.dataframe(merged_stock, use_container_width=True)
+            else:
+                st.info("No stock data available.")
+        
+        elif view_mode == "Batch-Wise Detailed Inventory":
+            if not df_pur.empty:
+                cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'created_at', 'sr_username'] if c in df_pur.columns]
+                st.dataframe(df_pur[cols_to_show], use_container_width=True)
+            else: st.info("No stock data available.")
+            
+        else: # SR-Wise
+            if not df_pur.empty:
+                sr_select = st.selectbox("Select Sales Representative:", sorted(df_pur['sr_username'].dropna().unique()))
+                sr_stock = df_pur[df_pur['sr_username'] == sr_select]
+                st.dataframe(sr_stock, use_container_width=True)
+            else: st.info("No stock data available.")
+            
     else:
-        st.info("No Stock data available.")
+        # Sales Executive View
+        df_pur_sr = df_pur[df_pur['sr_username'] == st.session_state['username']] if not df_pur.empty else pd.DataFrame()
+        if not df_pur_sr.empty:
+            cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'created_at'] if c in df_pur_sr.columns]
+            st.dataframe(df_pur_sr[cols_to_show], use_container_width=True)
+        else:
+            st.info("No Stock data available for your ID.")
 
+# ==========================================
+# 5. USER MANAGEMENT (ADMIN)
+# ==========================================
 elif active_tab == "👥 User Management (Admin)":
     st.markdown("<h2 style='color: #E65100;'>👥 Sales Team & User Management</h2>", unsafe_allow_html=True)
     u_col1, u_col2 = st.columns([1, 1])
@@ -713,6 +771,9 @@ elif active_tab == "👥 User Management (Admin)":
             st.success(f"User '{del_username}' removed.")
             st.rerun()
 
+# ==========================================
+# 6. MANAGE MASTER PRODUCTS
+# ==========================================
 elif active_tab == "🏷️ Manage Master Products":
     st.markdown("<h2 style='color: #E65100;'>🏷️ Manage Master Products List</h2>", unsafe_allow_html=True)
     
@@ -736,7 +797,7 @@ elif active_tab == "🏷️ Manage Master Products":
 
     with m_col2:
         st.markdown("### 📋 Editable Master Products Database")
-        st.info("💡 **Tips:** Double-click any cell to edit. Select row and click 'Save Database Changes' to update.")
+        st.info("💡 **Tips:** Edit any cell and click 'Save Database Changes' to update.")
         
         m_df = load_master_products()
         display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
