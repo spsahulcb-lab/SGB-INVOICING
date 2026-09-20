@@ -1,7 +1,7 @@
 import sqlite3
 import pandas as pd
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from fpdf import FPDF
 import urllib.parse
 import json
@@ -238,6 +238,17 @@ def clean_float(val, default=0.0):
         try: return float(match.group())
         except ValueError: return default
     return default
+
+def filter_by_date_range(df, start_date, end_date, date_col='created_at'):
+    if df.empty or date_col not in df.columns:
+        return df
+    
+    # Convert column to datetime
+    temp_dates = pd.to_datetime(df[date_col], errors='coerce').dt.date
+    s_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
+    e_date = end_date if isinstance(end_date, date) else pd.to_datetime(end_date).date()
+    
+    return df[(temp_dates >= s_date) & (temp_dates <= e_date)]
 
 def get_existing_parties():
     sales_df = load_transaction_data("sales")
@@ -592,7 +603,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
 # ==========================================
-# 2. SALES HISTORY
+# 2. SALES HISTORY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
@@ -600,6 +611,14 @@ elif active_tab == "📦 Sales History":
     df_sales = load_transaction_data("sales")
     
     if not df_sales.empty:
+        # Date Filter Row
+        st.markdown("##### 📅 Date Range Filter")
+        d_col1, d_col2 = st.columns(2)
+        with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="sal_start")
+        with d_col2: end_d = st.date_input("End Date", value=date.today(), key="sal_end")
+        
+        df_sales = filter_by_date_range(df_sales, start_d, end_d)
+        
         if is_manager:
             st.info("👑 **Manager Controls**: Review team cumulative sales or filter by Sales Executive.")
             sr_options = ["All Sales Team (Cumulative)"] + sorted([s for s in df_sales['sr_username'].dropna().unique()])
@@ -648,10 +667,10 @@ elif active_tab == "📦 Sales History":
             display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'sr_username'] if c in filtered_df.columns]
             st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Sales records found.")
+        st.info("No Sales records found in selected range.")
 
 # ==========================================
-# 3. PURCHASE HISTORY
+# 3. PURCHASE HISTORY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "📥 Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
@@ -659,6 +678,14 @@ elif active_tab == "📥 Purchase History (Stock In)":
     df_purchase = load_transaction_data("purchase")
     
     if not df_purchase.empty:
+        # Date Filter Row
+        st.markdown("##### 📅 Date Range Filter")
+        d_col1, d_col2 = st.columns(2)
+        with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="pur_start")
+        with d_col2: end_d = st.date_input("End Date", value=date.today(), key="pur_end")
+        
+        df_purchase = filter_by_date_range(df_purchase, start_d, end_d)
+        
         if is_manager:
             st.info("👑 **Manager Controls**: Review team cumulative purchases or filter by Sales Executive.")
             sr_options = ["All Sales Team (Cumulative)"] + sorted([s for s in df_purchase['sr_username'].dropna().unique()])
@@ -688,7 +715,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
         if selected_inv != "None (Summary View)":
             inv_df = filtered_df[filtered_df['invoice'] == selected_inv]
             p_name = inv_df['party'].iloc[0] if not inv_df.empty else selected_party
-            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_date.empty else ""
+            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_df.empty else ""
             
             st.markdown(f"""
                 <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00; margin-bottom:15px;'>
@@ -707,16 +734,24 @@ elif active_tab == "📥 Purchase History (Stock In)":
             display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'sr_username'] if c in filtered_df.columns]
             st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Purchase records found.")
+        st.info("No Purchase records found in selected range.")
 
 # ==========================================
-# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY
+# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock & Quantity-Value Summary</h2>", unsafe_allow_html=True)
     
     df_pur = load_transaction_data("purchase")
     df_sal = load_transaction_data("sales")
+    
+    st.markdown("##### 📅 Select Summary Date Range")
+    d_col1, d_col2 = st.columns(2)
+    with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="stk_start")
+    with d_col2: end_d = st.date_input("End Date", value=date.today(), key="stk_end")
+    
+    df_pur = filter_by_date_range(df_pur, start_d, end_d)
+    df_sal = filter_by_date_range(df_sal, start_d, end_d)
     
     if is_manager:
         st.info("📊 **Manager Review Dashboard**: Viewing merged stock and sales value across Sales Representatives.")
@@ -750,7 +785,7 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 
                 st.dataframe(display_df, use_container_width=True)
             else:
-                st.info("No stock data available.")
+                st.info("No stock data available in selected date range.")
         
         # 2. BATCH-WISE INVENTORY
         elif view_mode == "Batch-Wise Inventory":
@@ -758,7 +793,7 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'amount', 'created_at', 'sr_username'] if c in df_pur.columns]
                 st.dataframe(df_pur[cols_to_show], use_container_width=True)
             else: 
-                st.info("No batch stock data available.")
+                st.info("No batch stock data available in selected date range.")
             
         # 3. SR-WISE INDIVIDUAL STOCK SUMMARY
         else:
@@ -803,7 +838,7 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                     st.subheader(f"📋 Product Summary for {selected_sr}")
                     st.dataframe(sr_display, use_container_width=True)
                 else:
-                    st.info(f"No records found for Sales Executive '{selected_sr}'.")
+                    st.info(f"No records found for Sales Executive '{selected_sr}' in selected range.")
             else:
                 st.info("No Sales Representative data available.")
             
@@ -834,7 +869,7 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
             
             st.dataframe(sr_display, use_container_width=True)
         else:
-            st.info("No Stock data available for your ID.")
+            st.info("No Stock data available for your ID in selected range.")
 
 # ==========================================
 # 5. USER MANAGEMENT (ADMIN)
