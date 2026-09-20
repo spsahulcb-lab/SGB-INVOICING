@@ -38,17 +38,17 @@ def init_local_db():
     
     # Create tables if not exist
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
-    # Auto Migration for sales & purchase tables
+    # Auto Migration for Batch & Expiry in sales & purchase tables
     for tbl in ["sales", "purchase"]:
-        for col, dtype in [("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
+        for col, dtype in [("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
             except Exception: pass
             
@@ -171,6 +171,8 @@ def save_transaction_data(table_name, items, invoice, party):
             "party": party,
             "product": row.get('PRODUCT', ''),
             "pack": row.get('PACK', '1x10'),
+            "batch": str(row.get('BATCH', 'B001')),
+            "expiry": str(row.get('EXPIRY', '12/28')),
             "qty": float(row.get('QTY', 0)),
             "free_qty": str(row.get('DEAL/FREE', '')),
             "mrp": float(row.get('MRP', 0)),
@@ -189,9 +191,9 @@ def save_transaction_data(table_name, items, invoice, party):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for r in records:
-        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (r["invoice"], r["party"], r["product"], r["pack"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"]))
+        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, batch, expiry, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (r["invoice"], r["party"], r["product"], r["pack"], r["batch"], r["expiry"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"]))
     conn.commit()
     conn.close()
 
@@ -265,13 +267,13 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
-        You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip.
+        You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip including Batch and Expiry Date.
         Master Reference Product List: {", ".join(master_list)}
 
         Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
         JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "1x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
+          {{"PRODUCT": "Item Name", "PACK": "1x10", "BATCH": "B123", "EXPIRY": "12/28", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 5.0}}
         ]
         """
         if uploaded_file:
@@ -294,6 +296,8 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "1x10")
+            batch = str(item.get("BATCH", "B001"))
+            expiry = str(item.get("EXPIRY", "12/28"))
             qty = clean_float(item.get("QTY"), default=1.0)
             deal = str(item.get("DEAL", "NA"))
             
@@ -322,6 +326,8 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             cleaned_data.append({
                 "PRODUCT": corrected_prod,
                 "PACK": pack,
+                "BATCH": batch,
+                "EXPIRY": expiry,
                 "QTY": qty,
                 "DEAL/FREE": deal,
                 "MRP": mrp,
@@ -350,27 +356,29 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, su
     pdf.ln(5)
     
     pdf.set_font("Helvetica", 'B', 8)
-    pdf.cell(45, 7, "Product", 1)
-    pdf.cell(15, 7, "Pack", 1)
-    pdf.cell(15, 7, "Qty", 1)
-    pdf.cell(15, 7, "Deal", 1)
-    pdf.cell(20, 7, "MRP (Rs)", 1)
-    pdf.cell(20, 7, "Disc(%)", 1)
-    pdf.cell(20, 7, "Disc(Rs)", 1)
-    pdf.cell(20, 7, "Rate (Rs)", 1)
+    pdf.cell(35, 7, "Product", 1)
+    pdf.cell(12, 7, "Pack", 1)
+    pdf.cell(15, 7, "Batch", 1)
+    pdf.cell(12, 7, "Exp", 1)
+    pdf.cell(12, 7, "Qty", 1)
+    pdf.cell(12, 7, "Deal", 1)
+    pdf.cell(18, 7, "MRP (Rs)", 1)
+    pdf.cell(16, 7, "Disc(%)", 1)
+    pdf.cell(18, 7, "Rate (Rs)", 1)
     pdf.cell(20, 7, "Amount", 1)
     pdf.ln()
     
     pdf.set_font("Helvetica", '', 8)
     for row in cart_data:
-        pdf.cell(45, 6, str(row['PRODUCT'])[:22], 1)
-        pdf.cell(15, 6, str(row.get('PACK', '1x10'))[:8], 1)
-        pdf.cell(15, 6, str(row['QTY']), 1)
-        pdf.cell(15, 6, str(row.get('DEAL/FREE', '')), 1)
-        pdf.cell(20, 6, f"{float(row['MRP']):.2f}", 1)
-        pdf.cell(20, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
-        pdf.cell(20, 6, f"{float(row.get('DISC (₹)', 0)):.2f}", 1)
-        pdf.cell(20, 6, f"{float(row['RATE']):.2f}", 1)
+        pdf.cell(35, 6, str(row['PRODUCT'])[:18], 1)
+        pdf.cell(12, 6, str(row.get('PACK', '1x10'))[:6], 1)
+        pdf.cell(15, 6, str(row.get('BATCH', ''))[:8], 1)
+        pdf.cell(12, 6, str(row.get('EXPIRY', ''))[:6], 1)
+        pdf.cell(12, 6, str(row['QTY']), 1)
+        pdf.cell(12, 6, str(row.get('DEAL/FREE', '')), 1)
+        pdf.cell(18, 6, f"{float(row['MRP']):.2f}", 1)
+        pdf.cell(16, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
+        pdf.cell(18, 6, f"{float(row['RATE']):.2f}", 1)
         pdf.cell(20, 6, f"{float(row['AMOUNT']):.2f}", 1)
         pdf.ln()
         
@@ -458,33 +466,38 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["Gross Rate Mode (With GST)", "NET RATE Mode (GST Excluded / 0%)"], horizontal=True)
 
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
-        p1, p2, p3, p4, p5, p6 = st.columns([2.5, 1, 1, 1.2, 1.2, 1])
+        p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
         with p1: sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST if MASTER_LIST else ["Select Product"])
         with p2: m_pack = st.text_input("Pack", value="1x10", key="net_pack")
-        with p3: s_qty = st.number_input("Qty", min_value=1, value=10, key="net_qty")
-        with p4: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0, key="net_mrp")
-        with p5: s_disc_pct = st.number_input("Discount % (on MRP)", min_value=0.0, max_value=100.0, value=20.0, key="net_disc")
-        with p6:
+        with p3: m_batch = st.text_input("Batch", value="B001", key="net_batch")
+        with p4: m_exp = st.text_input("Expiry", value="12/28", key="net_exp")
+        with p5: s_qty = st.number_input("Qty", min_value=1, value=10, key="net_qty")
+        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0, key="net_mrp")
+        with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=20.0, key="net_disc")
+        with p8:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             st.write(f"**Net Rate:** ₹{calc_net_rate}")
             if st.button("➕ Add Net Item"):
                 amt = float(s_qty) * calc_net_rate
                 st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "QTY": float(s_qty), "DEAL/FREE": "NA",
-                    "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+                    "QTY": float(s_qty), "DEAL/FREE": "NA", "MRP": float(s_mrp),
+                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
                     "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
     else:
-        p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
+        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.8, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
         with p1: sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
         with p2: m_pack = st.text_input("Pack", value="1x10")
-        with p3: s_qty = st.number_input("Qty", min_value=1, value=10)
-        with p4: s_deal = st.text_input("Deal/Free", value="NA")
-        with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
-        with p6: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
-        with p7: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-        with p8:
+        with p3: m_batch = st.text_input("Batch", value="B001")
+        with p4: m_exp = st.text_input("Expiry", value="12/28")
+        with p5: s_qty = st.number_input("Qty", min_value=1, value=10)
+        with p6: s_deal = st.text_input("Deal", value="NA")
+        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
+        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+        with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+        with p10:
             if s_disc_pct > 0:
                 calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             else:
@@ -493,8 +506,9 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             if st.button("➕ Add Item"):
                 amt = float(s_qty) * calc_rate
                 st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "QTY": float(s_qty), "DEAL/FREE": s_deal,
-                    "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+                    "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
+                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
                     "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
@@ -561,7 +575,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         with save_col4:
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
-                msg += f"• {row['PRODUCT']} - {row['QTY']} Qty @ ₹{row['RATE']}\n"
+                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','-')}, Exp:{row.get('EXPIRY','-')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
             wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
 
@@ -571,26 +585,104 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
 elif active_tab == "📦 Sales History":
-    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register (Party Statement)</h2>", unsafe_allow_html=True)
+    
     df_sales = load_transaction_data("sales")
+    
     if not df_sales.empty:
-        st.dataframe(df_sales, use_container_width=True)
+        parties_list = ["All Parties"] + sorted([p for p in df_sales['party'].unique() if p])
+        selected_party = st.selectbox("🏬 Select Party to View Statement:", parties_list)
+        
+        filtered_df = df_sales if selected_party == "All Parties" else df_sales[df_sales['party'] == selected_party]
+            
+        total_sales_amt = filtered_df['amount'].sum() if 'amount' in filtered_df.columns else 0.0
+        total_invoices = filtered_df['invoice'].nunique() if 'invoice' in filtered_df.columns else 0
+        
+        c1, c2 = st.columns(2)
+        with c1: st.metric("📄 Total Invoices", total_invoices)
+        with c2: st.metric("💰 Total Sales Amount", f"₹ {total_sales_amt:,.2f}")
+            
+        st.markdown("---")
+        
+        invoices_list = ["None (Summary View)"] + sorted(filtered_df['invoice'].unique().tolist(), reverse=True)
+        selected_inv = st.selectbox("🔍 Select Particular Invoice / Bill to View Details:", invoices_list)
+        
+        if selected_inv != "None (Summary View)":
+            inv_df = filtered_df[filtered_df['invoice'] == selected_inv]
+            p_name = inv_df['party'].iloc[0] if not inv_df.empty else selected_party
+            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_df.empty else ""
+            
+            st.markdown(f"""
+                <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00; margin-bottom:15px;'>
+                    <h3 style='color:#E65100; margin:0;'>🧾 Invoice No: {selected_inv}</h3>
+                    <p style='margin:5px 0 0 0; color:#333;'><b>Party:</b> {p_name} | <b>Date/Time:</b> {inv_date}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'disc_pct', 'disc_rs', 'rate', 'gst', 'amount'] if c in inv_df.columns]
+            st.dataframe(inv_df[display_cols], use_container_width=True)
+            
+            inv_subtotal = inv_df['amount'].sum() if 'amount' in inv_df.columns else 0.0
+            st.markdown(f"#### **Grand Total for {selected_inv}: ₹ {inv_subtotal:,.2f}**")
+        else:
+            st.subheader(f"📋 Sales Summary Statement ({selected_party})")
+            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'gst', 'amount'] if c in filtered_df.columns]
+            st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Sales records found.")
+        st.info("No Sales records found in database.")
 
 elif active_tab == "📥 Purchase History (Stock In)":
-    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register (Party Statement)</h2>", unsafe_allow_html=True)
+    
     df_purchase = load_transaction_data("purchase")
+    
     if not df_purchase.empty:
-        st.dataframe(df_purchase, use_container_width=True)
+        parties_list = ["All Suppliers/Parties"] + sorted([p for p in df_purchase['party'].unique() if p])
+        selected_party = st.selectbox("🏬 Select Supplier / Party to View Purchase Statement:", parties_list)
+        
+        filtered_df = df_purchase if selected_party == "All Suppliers/Parties" else df_purchase[df_purchase['party'] == selected_party]
+            
+        total_pur_amt = filtered_df['amount'].sum() if 'amount' in filtered_df.columns else 0.0
+        total_invoices = filtered_df['invoice'].nunique() if 'invoice' in filtered_df.columns else 0
+        
+        c1, c2 = st.columns(2)
+        with c1: st.metric("📄 Total Purchase Invoices", total_invoices)
+        with c2: st.metric("💰 Total Purchase Amount", f"₹ {total_pur_amt:,.2f}")
+            
+        st.markdown("---")
+        
+        invoices_list = ["None (Summary View)"] + sorted(filtered_df['invoice'].unique().tolist(), reverse=True)
+        selected_inv = st.selectbox("🔍 Select Particular Purchase Invoice / Bill to View Details:", invoices_list)
+        
+        if selected_inv != "None (Summary View)":
+            inv_df = filtered_df[filtered_df['invoice'] == selected_inv]
+            p_name = inv_df['party'].iloc[0] if not inv_df.empty else selected_party
+            inv_date = inv_df['created_at'].iloc[0] if 'created_at' in inv_df.columns and not inv_df.empty else ""
+            
+            st.markdown(f"""
+                <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00; margin-bottom:15px;'>
+                    <h3 style='color:#E65100; margin:0;'>🧾 Purchase Invoice No: {selected_inv}</h3>
+                    <p style='margin:5px 0 0 0; color:#333;'><b>Supplier/Party:</b> {p_name} | <b>Date/Time:</b> {inv_date}</p>
+                </div>
+            """, unsafe_allow_html=True)
+            
+            display_cols = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'disc_pct', 'disc_rs', 'rate', 'gst', 'amount'] if c in inv_df.columns]
+            st.dataframe(inv_df[display_cols], use_container_width=True)
+            
+            inv_subtotal = inv_df['amount'].sum() if 'amount' in inv_df.columns else 0.0
+            st.markdown(f"#### **Grand Total for Purchase Bill ({selected_inv}): ₹ {inv_subtotal:,.2f}**")
+        else:
+            st.subheader(f"📋 Purchase Summary Statement ({selected_party})")
+            display_cols = [c for c in ['invoice', 'created_at', 'party', 'product', 'pack', 'batch', 'expiry', 'qty', 'rate', 'gst', 'amount'] if c in filtered_df.columns]
+            st.dataframe(filtered_df[display_cols], use_container_width=True)
     else:
-        st.info("No Purchase records found.")
+        st.info("No Purchase records found in database.")
 
 elif active_tab == "🏭 Batch Stock & Expiry Alert":
-    st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock Overview</h2>", unsafe_allow_html=True)
+    st.markdown("<h2 style='color: #E65100;'>🏭 Live Batch Stock & Expiry Overview</h2>", unsafe_allow_html=True)
     df_pur = load_transaction_data("purchase")
     if not df_pur.empty:
-        cols_to_show = [c for c in ['product', 'pack', 'qty', 'free_qty', 'mrp', 'rate', 'created_at'] if c in df_pur.columns]
+        cols_to_show = [c for c in ['product', 'pack', 'batch', 'expiry', 'qty', 'free_qty', 'mrp', 'rate', 'created_at'] if c in df_pur.columns]
         st.dataframe(df_pur[cols_to_show], use_container_width=True)
     else:
         st.info("No Stock data available.")
@@ -641,61 +733,10 @@ elif active_tab == "🏷️ Manage Master Products":
                 add_master_product(p_name, p_pack, p_mrp, p_rate, p_tax)
                 st.success(f"✅ Product '{p_name}' added!")
                 st.rerun()
-                
-        st.markdown("---")
-        st.markdown("### 📂 Upload Product List (CSV / Excel)")
-        file_up = st.file_uploader("Upload Price List File", type=["csv", "xlsx", "xls"])
-        if file_up:
-            try:
-                if file_up.name.endswith('.csv'):
-                    df_up = pd.read_csv(file_up)
-                else:
-                    try: df_up = pd.read_excel(file_up, engine='openpyxl')
-                    except: df_up = pd.read_excel(file_up)
-                
-                if not any("product" in str(c).lower() for c in df_up.columns):
-                    file_up.seek(0)
-                    if file_up.name.endswith('.csv'):
-                        df_up = pd.read_csv(file_up, skiprows=2)
-                    else:
-                        try: df_up = pd.read_excel(file_up, skiprows=2, engine='openpyxl')
-                        except: df_up = pd.read_excel(file_up, skiprows=2)
-                    
-                st.write("Preview of detected columns:")
-                st.dataframe(df_up.head(), use_container_width=True)
-                
-                cols = df_up.columns.tolist()
-                c_prod = st.selectbox("Product Column", cols, index=[i for i, c in enumerate(cols) if "product" in str(c).lower()][0] if any("product" in str(c).lower() for c in cols) else 0)
-                c_pack = st.selectbox("Pack Column", ["None"] + cols, index=[i+1 for i, c in enumerate(cols) if "pack" in str(c).lower()][0] if any("pack" in str(c).lower() for c in cols) else 0)
-                c_mrp = st.selectbox("MRP Column", ["None"] + cols, index=[i+1 for i, c in enumerate(cols) if "mrp" in str(c).lower()][0] if any("mrp" in str(c).lower() for c in cols) else 0)
-                c_rate = st.selectbox("Rate Column", ["None"] + cols, index=[i+1 for i, c in enumerate(cols) if "rate" in str(c).lower()][0] if any("rate" in str(c).lower() for c in cols) else 0)
-                c_tax = st.selectbox("Tax Column", ["None"] + cols, index=[i+1 for i, c in enumerate(cols) if "tax" in str(c).lower() or "gst" in str(c).lower()][0] if any("tax" in str(c).lower() or "gst" in str(c).lower() for c in cols) else 0)
-                
-                if st.button("🚀 Import Master List"):
-                    records = []
-                    for _, r in df_up.iterrows():
-                        p_val = str(r[c_prod]).strip()
-                        if p_val and p_val.lower() != 'nan':
-                            mrp_v = clean_float(r[c_mrp]) if c_mrp != "None" else 0.0
-                            tax_v = clean_float(r[c_tax], default=5.0) if c_tax != "None" else 5.0
-                            rate_v = clean_float(r[c_rate]) if c_rate != "None" else round((mrp_v * 80.0) / (100.0 + tax_v), 2)
-                            
-                            records.append({
-                                "product_name": p_val,
-                                "pack": str(r[c_pack]) if c_pack != "None" else "1x10",
-                                "mrp": mrp_v,
-                                "rate": rate_v,
-                                "tax": tax_v
-                            })
-                    bulk_upload_master_products(records)
-                    st.success(f"✅ Successfully imported {len(records)} products!")
-                    st.rerun()
-            except Exception as ex:
-                st.error(f"Error reading file: {ex}. Try saving the Excel file as .xlsx format.")
 
     with m_col2:
         st.markdown("### 📋 Editable Master Products Database")
-        st.info("💡 **Tips:** Double-click any cell to edit. Select row and press Delete or click 'Save Database Changes' to delete permanently.")
+        st.info("💡 **Tips:** Double-click any cell to edit. Select row and click 'Save Database Changes' to update.")
         
         m_df = load_master_products()
         display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
