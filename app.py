@@ -35,26 +35,22 @@ def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, discount REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, discount REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
-    # Auto-add missing columns to old table structure if exists
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
-        try:
-            c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
-        except Exception:
-            pass  # Column already exists
+        try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
+        except Exception: pass
     
     # Default Users
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
-    # Default Master Products
     defaults = [
         ("ATPLEX Syrup", "200ml", 145.0, 75.0, 12.0),
         ("Duty Beauty MINUS 16 Cream", "50gm", 450.0, 220.0, 18.0),
@@ -68,10 +64,8 @@ def init_local_db():
         ("Alobyd-P", "1x10", 95.0, 45.0, 12.0)
     ]
     for p in defaults:
-        try:
-            c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
-        except Exception:
-            pass
+        try: c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
+        except Exception: pass
         
     conn.commit()
     conn.close()
@@ -86,21 +80,17 @@ def get_supabase_client():
             key = st.secrets["SUPABASE_KEY"]
             if "supabase.co" in url:
                 return create_client(url, key)
-        except Exception:
-            return None
+        except Exception: return None
     return None
 
 supabase = get_supabase_client()
 
-# Dynamic Master Products Loader
 def load_master_products():
     if supabase:
         try:
             res = supabase.table("master_products").select("*").execute()
-            if res.data:
-                return pd.DataFrame(res.data)
-        except Exception:
-            pass
+            if res.data: return pd.DataFrame(res.data)
+        except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
@@ -111,8 +101,7 @@ def add_master_product(product_name, pack, mrp, rate, tax):
     p_clean = product_name.strip()
     if not p_clean: return
     if supabase:
-        try:
-            supabase.table("master_products").insert({"product_name": p_clean, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax}).execute()
+        try: supabase.table("master_products").insert({"product_name": p_clean, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax}).execute()
         except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
@@ -123,8 +112,7 @@ def add_master_product(product_name, pack, mrp, rate, tax):
 
 def delete_master_product(product_name):
     if supabase:
-        try:
-            supabase.table("master_products").delete().eq("product_name", product_name).execute()
+        try: supabase.table("master_products").delete().eq("product_name", product_name).execute()
         except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
@@ -135,8 +123,7 @@ def delete_master_product(product_name):
 
 def bulk_upload_master_products(records):
     if supabase:
-        try:
-            supabase.table("master_products").insert(records).execute()
+        try: supabase.table("master_products").insert(records).execute()
         except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
@@ -148,7 +135,6 @@ def bulk_upload_master_products(records):
     conn.close()
 
 def auto_correct_brand(scanned_name, master_list):
-    """If product is not in master list or match ratio is low, return scanned_name as-is"""
     if not scanned_name or str(scanned_name).strip() == "":
         return "Unknown Item"
     matches = difflib.get_close_matches(scanned_name, master_list, n=1, cutoff=0.65)
@@ -166,36 +152,32 @@ def save_transaction_data(table_name, items, invoice, party):
             "qty": float(row.get('QTY', 0)),
             "free_qty": str(row.get('DEAL/FREE', '')),
             "mrp": float(row.get('MRP', 0)),
-            "discount": float(row.get('DISCOUNT (%)', 0)),
+            "disc_pct": float(row.get('DISC (%)', 0)),
+            "disc_rs": float(row.get('DISC (₹)', 0)),
             "rate": float(row.get('RATE', 0)),
-            "gst": float(row.get('GST', 12)),
+            "gst": float(row.get('GST', 0)),
             "amount": float(row.get('AMOUNT', 0)),
             "created_at": today
         })
     
-    saved_cloud = False
     if supabase:
-        try:
-            supabase.table(table_name).insert(records).execute()
-            saved_cloud = True
+        try: supabase.table(table_name).insert(records).execute()
         except Exception: pass
     
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for r in records:
-        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, qty, free_qty, mrp, discount, rate, gst, amount, created_at)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (r["invoice"], r["party"], r["product"], r["pack"], r["qty"], r["free_qty"], r["mrp"], r["discount"], r["rate"], r["gst"], r["amount"], r["created_at"]))
+        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (r["invoice"], r["party"], r["product"], r["pack"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"]))
     conn.commit()
     conn.close()
-    return saved_cloud
 
 def load_transaction_data(table_name):
     if supabase:
         try:
             res = supabase.table(table_name).select("*").order("id", desc=True).execute()
-            if res.data:
-                return pd.DataFrame(res.data)
+            if res.data: return pd.DataFrame(res.data)
         except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
@@ -207,8 +189,7 @@ def load_all_users():
     if supabase:
         try:
             res = supabase.table("users").select("*").execute()
-            if res.data:
-                return {row["username"]: {"password": row["password"], "name": row["name"], "role": row["role"]} for row in res.data}
+            if res.data: return {row["username"]: {"password": row["password"], "name": row["name"], "role": row["role"]} for row in res.data}
         except Exception: pass
             
     conn = sqlite3.connect(DB_FILE)
@@ -253,11 +234,10 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         
         prompt = f"""
         Extract ALL medicine items accurately from image/text for pharma wholesale ERP.
-        Read each line item as written in the bill. Do NOT duplicate or force names.
-        Master Product List Reference: {", ".join(master_list)}
-        Return ONLY a clean JSON array of objects without Markdown formatting:
+        Master Reference List: {", ".join(master_list)}
+        Return ONLY a clean JSON array of objects:
         [
-          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "RATE": 50.0, "GST": 12}}
+          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12}}
         ]
         """
         if uploaded_file:
@@ -273,7 +253,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         for item in data:
             raw_prod = str(item.get("PRODUCT", "")).strip()
             corrected_prod = auto_correct_brand(raw_prod, master_list)
-            
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
@@ -286,16 +265,33 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             try: mrp = float(item.get("MRP", 0.0) or 0.0) or (float(m_match["mrp"].values[0]) if not m_match.empty else 0.0)
             except: mrp = 0.0
 
+            try: disc_pct = float(item.get("DISC_PCT", 0.0) or 0.0)
+            except: disc_pct = 0.0
+
+            try: disc_rs = float(item.get("DISC_RS", 0.0) or 0.0)
+            except: disc_rs = 0.0
+
             try: rate = float(item.get("RATE", 0.0) or 0.0) or (float(m_match["rate"].values[0]) if not m_match.empty else 0.0)
             except: rate = 0.0
             
-            try: gst = float(item.get("GST", 12) or 12)
-            except: gst = 12.0
+            # Net rate / Discount logic -> Auto GST 0
+            if disc_pct > 0 or disc_rs > 0:
+                gst = 0.0
+            else:
+                try: gst = float(item.get("GST", 12) or 12)
+                except: gst = 12.0
             
             if rate == 0.0 and mrp > 0:
-                rate = round((mrp * 80.0) / 118.0, 2) if gst == 18.0 else round((mrp * 80.0) / 105.0, 2)
+                if disc_pct > 0:
+                    rate = round(mrp * (1 - (disc_pct / 100.0)), 2)
+                else:
+                    rate = round((mrp * 80.0) / 118.0, 2) if gst == 18.0 else round((mrp * 80.0) / 105.0, 2)
                 
-            amt = qty * rate
+            eff_rate = rate - disc_rs
+            if disc_pct > 0 and disc_rs == 0:
+                eff_rate = rate * (1 - (disc_pct / 100.0))
+                
+            amt = qty * eff_rate
             
             cleaned_data.append({
                 "PRODUCT": corrected_prod,
@@ -303,8 +299,9 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
                 "QTY": qty,
                 "DEAL/FREE": deal,
                 "MRP": mrp,
-                "DISCOUNT (%)": 0.0,
-                "RATE": rate,
+                "DISC (%)": disc_pct,
+                "DISC (₹)": disc_rs,
+                "RATE": round(rate, 2),
                 "GST": gst,
                 "AMOUNT": round(amt, 2)
             })
@@ -316,7 +313,7 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
 # ==========================================
 # PDF GENERATOR
 # ==========================================
-def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, total_disc, sub_total, gst_val, net_val):
+def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, sub_total, gst_val, net_val):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", 'B', 16)
@@ -327,29 +324,34 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, total_disc, s
     pdf.ln(5)
     
     pdf.set_font("Helvetica", 'B', 8)
-    pdf.cell(50, 7, "Product", 1)
-    pdf.cell(20, 7, "Pack", 1)
+    pdf.cell(45, 7, "Product", 1)
+    pdf.cell(15, 7, "Pack", 1)
     pdf.cell(15, 7, "Qty", 1)
-    pdf.cell(20, 7, "Deal", 1)
+    pdf.cell(15, 7, "Deal", 1)
     pdf.cell(20, 7, "MRP (Rs)", 1)
+    pdf.cell(20, 7, "Disc(%)", 1)
+    pdf.cell(20, 7, "Disc(Rs)", 1)
     pdf.cell(20, 7, "Rate (Rs)", 1)
-    pdf.cell(45, 7, "Amount (Rs)", 1)
+    pdf.cell(20, 7, "Amount", 1)
     pdf.ln()
     
     pdf.set_font("Helvetica", '', 8)
     for row in cart_data:
-        pdf.cell(50, 6, str(row['PRODUCT'])[:24], 1)
-        pdf.cell(20, 6, str(row.get('PACK', ''))[:10], 1)
+        pdf.cell(45, 6, str(row['PRODUCT'])[:22], 1)
+        pdf.cell(15, 6, str(row.get('PACK', ''))[:8], 1)
         pdf.cell(15, 6, str(row['QTY']), 1)
-        pdf.cell(20, 6, str(row.get('DEAL/FREE', '')), 1)
+        pdf.cell(15, 6, str(row.get('DEAL/FREE', '')), 1)
         pdf.cell(20, 6, f"{float(row['MRP']):.2f}", 1)
+        pdf.cell(20, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
+        pdf.cell(20, 6, f"{float(row.get('DISC (₹)', 0)):.2f}", 1)
         pdf.cell(20, 6, f"{float(row['RATE']):.2f}", 1)
-        pdf.cell(45, 6, f"{float(row['AMOUNT']):.2f}", 1)
+        pdf.cell(20, 6, f"{float(row['AMOUNT']):.2f}", 1)
         pdf.ln()
         
     pdf.ln(4)
     pdf.set_font("Helvetica", 'B', 10)
     pdf.cell(190, 6, f"Sub Total: Rs. {sub_total:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
+    pdf.cell(190, 6, f"Extra Bill Discount: Rs. {bill_disc:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     
@@ -374,8 +376,7 @@ if not st.session_state["logged_in"]:
                 st.session_state["logged_user"] = USERS_DB[username_input]
                 st.session_state["username"] = username_input
                 st.rerun()
-            else:
-                st.error("❌ Invalid Username or Password")
+            else: st.error("❌ Invalid Username or Password")
     st.stop()
 
 logged_user = st.session_state["logged_user"]
@@ -415,8 +416,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     st.session_state["scanned_cart"].extend(items)
                     st.success("✅ Fast Scan Completed!")
                     st.rerun()
-        else:
-            st.warning("Please upload a slip image or paste text.")
+        else: st.warning("Please upload a slip image or paste text.")
 
     st.markdown("---")
     
@@ -427,21 +427,25 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
 
     st.markdown("##### ➕ Manual Item Addition")
-    p1, p2, p3, p4, p5, p6, p7 = st.columns([2, 1, 1, 1, 1, 1, 1])
+    p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
     with p1: sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST else ["Select Product"])
     with p2: m_pack = st.text_input("Pack", value="10x10")
     with p3: s_qty = st.number_input("Qty", min_value=1, value=10)
     with p4: s_deal = st.text_input("Deal/Free", value="NA")
     with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
-    with p6: s_disc = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=20.0)
-    with p7:
-        calc_rate = round(s_mrp * (1 - (s_disc / 100.0)), 2)
+    with p6: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+    with p7: s_disc_rs = st.number_input("Disc (₹)", min_value=0.0, value=0.0)
+    with p8:
+        # Auto zero GST if discount selected
+        auto_gst = 0.0 if (s_disc_pct > 0 or s_disc_rs > 0) else 12.0
+        calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)) - s_disc_rs, 2)
         st.write(f"**Rate:** ₹{calc_rate}")
         if st.button("➕ Add"):
             amt = float(s_qty) * calc_rate
             st.session_state["scanned_cart"].append({
                 "PRODUCT": sel_prod, "PACK": m_pack, "QTY": float(s_qty), "DEAL/FREE": s_deal,
-                "MRP": float(s_mrp), "DISCOUNT (%)": float(s_disc), "RATE": calc_rate, "GST": 12.0, "AMOUNT": round(amt, 2)
+                "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": float(s_disc_rs),
+                "RATE": calc_rate, "GST": auto_gst, "AMOUNT": round(amt, 2)
             })
             st.rerun()
 
@@ -461,18 +465,24 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         st.session_state["scanned_cart"] = edited_df.to_dict('records')
         
+        # Overall Bill Discount Option
+        o_col1, o_col2 = st.columns([2, 1])
+        with o_col2:
+            extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
+        
         if not edited_df.empty:
             sub_total = float(edited_df["AMOUNT"].sum())
             total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
-            total_disc_val = total_mrp_sum - sub_total if total_mrp_sum > 0 else 0.0
-            gst_val = sub_total * 0.12
-            net_val = sub_total + gst_val
+            
+            # Auto GST adjustment
+            gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
+            net_val = (sub_total - extra_bill_disc) + gst_val
         else:
-            sub_total = total_mrp_sum = total_disc_val = gst_val = net_val = 0.0
+            sub_total = total_mrp_sum = gst_val = net_val = 0.0
         
         st.markdown(f"""
             <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
-                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Discount Shell: ₹ {total_disc_val:,.2f}</h4>
+                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
                 <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
             </div>
         """, unsafe_allow_html=True)
@@ -496,7 +506,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
         with save_col3:
             try:
-                pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, total_disc_val, sub_total, gst_val, net_val)
+                pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, extra_bill_disc, sub_total, gst_val, net_val)
                 st.download_button(label="📄 Download PDF", data=pdf_bytes, file_name=f"{inv_no}.pdf", mime="application/pdf")
             except Exception as pdf_err: st.error(f"PDF Error: {pdf_err}")
 
@@ -577,14 +587,21 @@ elif active_tab == "🏷️ Manage Master Products":
         file_up = st.file_uploader("Upload Price List File", type=["csv", "xlsx", "xls"])
         if file_up:
             try:
-                if file_up.name.endswith('.csv'): df_up = pd.read_csv(file_up)
+                # Robust Excel / CSV parsing
+                if file_up.name.endswith('.csv'):
+                    df_up = pd.read_csv(file_up)
                 else:
-                    try: df_up = pd.read_excel(file_up)
-                    except: df_up = pd.read_excel(file_up, engine='xlrd')
+                    try: df_up = pd.read_excel(file_up, engine='openpyxl')
+                    except: df_up = pd.read_excel(file_up)
                 
+                # Handling top header rows if title exists
                 if not any("product" in str(c).lower() for c in df_up.columns):
                     file_up.seek(0)
-                    df_up = pd.read_csv(file_up, skiprows=2) if file_up.name.endswith('.csv') else pd.read_excel(file_up, skiprows=2)
+                    if file_up.name.endswith('.csv'):
+                        df_up = pd.read_csv(file_up, skiprows=2)
+                    else:
+                        try: df_up = pd.read_excel(file_up, skiprows=2, engine='openpyxl')
+                        except: df_up = pd.read_excel(file_up, skiprows=2)
                     
                 st.write("Preview of detected columns:")
                 st.dataframe(df_up.head(), use_container_width=True)
@@ -612,7 +629,7 @@ elif active_tab == "🏷️ Manage Master Products":
                     st.success(f"✅ Successfully imported {len(records)} products!")
                     st.rerun()
             except Exception as ex:
-                st.error(f"Error reading file: {ex}")
+                st.error(f"Error reading file: {ex}. Try saving the Excel file as .xlsx format.")
 
     with m_col2:
         st.markdown("### 📋 Master Products Database")
