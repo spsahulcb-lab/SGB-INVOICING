@@ -5,6 +5,7 @@ from fpdf import FPDF
 import urllib.parse
 import json
 import sqlite3
+import re
 import difflib
 import google.generativeai as genai
 from PIL import Image
@@ -221,6 +222,20 @@ def delete_user_db(username):
     conn.commit()
     conn.close()
 
+# Helper function to extract clean floats even from strings like 'GST5%'
+def clean_float(val, default=0.0):
+    if pd.isnull(val) or val is None:
+        return default
+    val_str = str(val).strip()
+    # Extract numbers or decimal from string like GST5% -> 5.0
+    match = re.search(r"[-+]?\d*\.\d+|\d+", val_str)
+    if match:
+        try:
+            return float(match.group())
+        except ValueError:
+            return default
+    return default
+
 # ==========================================
 # GEMINI AI SETUP
 # ==========================================
@@ -233,11 +248,13 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
-        Extract ALL medicine items accurately from image/text for pharma wholesale ERP.
-        Master Reference List: {", ".join(master_list)}
-        Return ONLY a clean JSON array of objects:
+        You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip.
+        Master Reference Product List: {", ".join(master_list)}
+
+        Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
+        JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12}}
+          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12.0}}
         ]
         """
         if uploaded_file:
@@ -247,6 +264,12 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             response = model.generate_content([prompt, text_input])
             
         clean_txt = response.text.replace("```json", "").replace("```", "").strip()
+        
+        # Regex search to extract json array if there is extra text
+        json_match = re.search(r'\[.*\]', clean_txt, re.DOTALL)
+        if json_match:
+            clean_txt = json_match.group(0)
+            
         data = json.loads(clean_txt)
         
         cleaned_data = []
@@ -257,29 +280,25 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             
             pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
             
-            try: qty = float(item.get("QTY", 1) or 1)
-            except: qty = 1.0
-            
+            qty = clean_float(item.get("QTY"), default=1.0)
             deal = str(item.get("DEAL", "NA"))
             
-            try: mrp = float(item.get("MRP", 0.0) or 0.0) or (float(m_match["mrp"].values[0]) if not m_match.empty else 0.0)
-            except: mrp = 0.0
+            mrp = clean_float(item.get("MRP"), default=0.0)
+            if mrp == 0.0 and not m_match.empty:
+                mrp = clean_float(m_match["mrp"].values[0])
 
-            try: disc_pct = float(item.get("DISC_PCT", 0.0) or 0.0)
-            except: disc_pct = 0.0
+            disc_pct = clean_float(item.get("DISC_PCT"), default=0.0)
+            disc_rs = clean_float(item.get("DISC_RS"), default=0.0)
 
-            try: disc_rs = float(item.get("DISC_RS", 0.0) or 0.0)
-            except: disc_rs = 0.0
-
-            try: rate = float(item.get("RATE", 0.0) or 0.0) or (float(m_match["rate"].values[0]) if not m_match.empty else 0.0)
-            except: rate = 0.0
+            rate = clean_float(item.get("RATE"), default=0.0)
+            if rate == 0.0 and not m_match.empty:
+                rate = clean_float(m_match["rate"].values[0])
             
             # Net rate / Discount logic -> Auto GST 0
             if disc_pct > 0 or disc_rs > 0:
                 gst = 0.0
             else:
-                try: gst = float(item.get("GST", 12) or 12)
-                except: gst = 12.0
+                gst = clean_float(item.get("GST"), default=12.0)
             
             if rate == 0.0 and mrp > 0:
                 if disc_pct > 0:
@@ -414,8 +433,10 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 items = process_bill_with_gemini(uploaded_img, raw_text, MASTER_DF)
                 if items:
                     st.session_state["scanned_cart"].extend(items)
-                    st.success("✅ Fast Scan Completed!")
+                    st.success(f"✅ Successfully Extracted {len(items)} Items!")
                     st.rerun()
+                else:
+                    st.error("❌ Could not extract items. Please make sure image is readable or try pasting bill text.")
         else: st.warning("Please upload a slip image or paste text.")
 
     st.markdown("---")
@@ -436,7 +457,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     with p6: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
     with p7: s_disc_rs = st.number_input("Disc (₹)", min_value=0.0, value=0.0)
     with p8:
-        # Auto zero GST if discount selected
         auto_gst = 0.0 if (s_disc_pct > 0 or s_disc_rs > 0) else 12.0
         calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)) - s_disc_rs, 2)
         st.write(f"**Rate:** ₹{calc_rate}")
@@ -465,7 +485,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         
         st.session_state["scanned_cart"] = edited_df.to_dict('records')
         
-        # Overall Bill Discount Option
         o_col1, o_col2 = st.columns([2, 1])
         with o_col2:
             extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
@@ -474,7 +493,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             sub_total = float(edited_df["AMOUNT"].sum())
             total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
             
-            # Auto GST adjustment
             gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
             net_val = (sub_total - extra_bill_disc) + gst_val
         else:
@@ -514,7 +532,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
                 msg += f"• {row['PRODUCT']} - {row['QTY']} Qty @ ₹{row['RATE']}\n"
-            wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg)}"
+            wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
 
         with save_col5:
@@ -587,14 +605,12 @@ elif active_tab == "🏷️ Manage Master Products":
         file_up = st.file_uploader("Upload Price List File", type=["csv", "xlsx", "xls"])
         if file_up:
             try:
-                # Robust Excel / CSV parsing
                 if file_up.name.endswith('.csv'):
                     df_up = pd.read_csv(file_up)
                 else:
                     try: df_up = pd.read_excel(file_up, engine='openpyxl')
                     except: df_up = pd.read_excel(file_up)
                 
-                # Handling top header rows if title exists
                 if not any("product" in str(c).lower() for c in df_up.columns):
                     file_up.seek(0)
                     if file_up.name.endswith('.csv'):
@@ -621,9 +637,9 @@ elif active_tab == "🏷️ Manage Master Products":
                             records.append({
                                 "product_name": p_val,
                                 "pack": str(r[c_pack]) if c_pack != "None" else "",
-                                "mrp": float(r[c_mrp]) if c_mrp != "None" and pd.notnull(r[c_mrp]) else 0.0,
-                                "rate": float(r[c_rate]) if c_rate != "None" and pd.notnull(r[c_rate]) else 0.0,
-                                "tax": float(r[c_tax]) if c_tax != "None" and pd.notnull(r[c_tax]) else 12.0
+                                "mrp": clean_float(r[c_mrp]) if c_mrp != "None" else 0.0,
+                                "rate": clean_float(r[c_rate]) if c_rate != "None" else 0.0,
+                                "tax": clean_float(r[c_tax], default=12.0) if c_tax != "None" else 12.0
                             })
                     bulk_upload_master_products(records)
                     st.success(f"✅ Successfully imported {len(records)} products!")
