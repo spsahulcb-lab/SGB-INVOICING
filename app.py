@@ -18,7 +18,13 @@ st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", i
 
 st.markdown(
     """
-    
+    <style>
+    .stApp { background-color: #FFF9F5; }
+    .main-header { font-size: 26px; font-weight: bold; color: #E65100; text-align: center; margin-bottom: 20px; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #FB8C00; color: white; border: none; }
+    .stButton>button:hover { background-color: #EF6C00; color: white; }
+    [data-testid="stSidebar"] { background-color: #FFF0E6; }
+    </style>
     """,
     unsafe_allow_html=True
 )
@@ -234,65 +240,131 @@ USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
 
 if not st.session_state["logged_in"]:
-    st.markdown("if st.button("Auto-Extract via Gemini AI"):
-    if up_img or raw_txt:
-        with st.spinner("Processing..."):
-            party, items = process_bill_with_gemini(up_img, raw_txt, MASTER_DF)
-            st.session_state["extracted_party_name"] = party
-            st.session_state["scanned_cart"] = items
-            st.rerun()
-    else: st.warning("Please upload an image or enter text.")
+    st.markdown("<h2 style='text-align: center; color: #E65100;'>SGB / LCB Pharma Wholesale ERP</h2>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 2, 1])
+    with c2:
+        u_in = st.text_input("Username").strip().lower()
+        p_in = st.text_input("Password", type="password")
+        if st.button("Secure Login"):
+            if u_in in USERS_DB and USERS_DB[u_in]["password"] == p_in:
+                st.session_state["logged_in"] = True
+                st.session_state["logged_user"] = USERS_DB[u_in]
+                st.session_state["username"] = u_in
+                st.rerun()
+            else: st.error("Invalid Username or Password")
+    st.stop()
 
-if st.session_state["scanned_cart"]:
-    st.markdown("---")
-    st.subheader("Current Billing Cart")
-    
-    c_p1, c_p2, c_p3 = st.columns([2, 2, 1])
-    with c_p1: party_name = st.selectbox("Party Name", options=list(set([st.session_state["extracted_party_name"]] + get_existing_parties() + ["Cash Sales"])))
-    with c_p2: invoice_no = st.text_input("Invoice Number", value=f"INV-{datetime.now().strftime('%Y%m%d%H%M')}")
-    with c_p3: gstin_no = st.text_input("GSTIN", value="27AAAAA0000A1Z5")
+logged_user = st.session_state["logged_user"]
+is_manager = logged_user["role"] == "Manager"
 
-    cart_df = pd.DataFrame(st.session_state["scanned_cart"])
-    edited_cart = st.data_editor(cart_df, num_rows="dynamic", use_container_width=True)
-    
-    sub_total, gst_val = 0.0, 0.0
-    updated_items = []
-    for _, row in edited_cart.iterrows():
-        qty = float(row.get("QTY", 0))
-        rate = float(row.get("RATE", 0))
-        gst_pct = float(row.get("GST", 5))
-        amt = qty * rate
-        sub_total += amt
-        gst_val += amt * (gst_pct / 100.0)
+st.sidebar.title(logged_user['name'])
+st.sidebar.caption(f"Role: {logged_user['role']}")
+
+nav_options = [
+    "AI Smart Scan & Billing",
+    "Sales History",
+    "Purchase History (Stock In)",
+    "Live Stock Summary"
+]
+if is_manager:
+    nav_options.append("User Management")
+    nav_options.append("Manage Master Products")
+
+active_tab = st.sidebar.radio("Navigation", nav_options)
+
+if st.sidebar.button("Logout"):
+    st.session_state["logged_in"] = False
+    st.session_state["scanned_cart"] = []
+    st.rerun()
+
+# 1. AI SCANNER & BILLING
+if active_tab == "AI Smart Scan & Billing":
+    st.markdown("<h2 style='color: #E65100;'>AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1: up_img = st.file_uploader("Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"])
+    with c2: raw_txt = st.text_area("Or Paste Text Data")
         
-        r_dict = row.to_dict()
-        r_dict["AMOUNT"] = round(amt, 2)
-        updated_items.append(r_dict)
+    if st.button("Auto-Extract via Gemini AI"):
+        if up_img or raw_txt:
+            with st.spinner("Processing..."):
+                party, items = process_bill_with_gemini(up_img, raw_txt, MASTER_DF)
+                st.session_state["extracted_party_name"] = party
+                st.session_state["scanned_cart"] = items
+                st.rerun()
+        else: st.warning("Please upload an image or enter text.")
 
-    net_val = sub_total + gst_val
-    st.markdown(f"### Sub Total: Rs.{sub_total:,.2f} | GST: Rs.{gst_val:,.2f} | Grand Total: Rs.{net_val:,.2f}")
+    if st.session_state["scanned_cart"]:
+        st.markdown("---")
+        st.subheader("Current Billing Cart")
+        
+        c_p1, c_p2, c_p3 = st.columns([2, 2, 1])
+        with c_p1: party_name = st.selectbox("Party Name", options=list(set([st.session_state["extracted_party_name"]] + get_existing_parties() + ["Cash Sales"])))
+        with c_p2: invoice_no = st.text_input("Invoice Number", value=f"INV-{datetime.now().strftime('%Y%m%d%H%M')}")
+        with c_p3: gstin_no = st.text_input("GSTIN", value="27AAAAA0000A1Z5")
 
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        if st.button("Save as Sale"):
-            save_transaction_data("sales", updated_items, invoice_no, party_name, st.session_state["username"])
-            st.success("Sale saved!")
-    with b2:
-        if st.button("Save as Purchase"):
-            save_transaction_data("purchase", updated_items, invoice_no, party_name, st.session_state["username"])
-            for itm in updated_items: add_master_product(itm["PRODUCT"], itm["PACK"], itm["MRP"], itm["RATE"], itm["GST"])
-            st.success("Purchase saved!")
-    with b3:
-        if st.button("Download PDF"):
-            pdf_bytes = generate_pdf_invoice(party_name, invoice_no, gstin_no, updated_items, sub_total, gst_val, net_val)
-            st.download_button("Click to Download PDF", data=pdf_bytes, file_name=f"{invoice_no}.pdf", mime="application/pdf")# ==========================================
+        cart_df = pd.DataFrame(st.session_state["scanned_cart"])
+        edited_cart = st.data_editor(cart_df, num_rows="dynamic", use_container_width=True)
+        
+        sub_total, gst_val = 0.0, 0.0
+        updated_items = []
+        for _, row in edited_cart.iterrows():
+            qty = float(row.get("QTY", 0))
+            rate = float(row.get("RATE", 0))
+            gst_pct = float(row.get("GST", 5))
+            amt = qty * rate
+            sub_total += amt
+            gst_val += amt * (gst_pct / 100.0)
+            
+            r_dict = row.to_dict()
+            r_dict["AMOUNT"] = round(amt, 2)
+            updated_items.append(r_dict)
+
+        net_val = sub_total + gst_val
+        st.markdown(f"### Sub Total: Rs.{sub_total:,.2f} | GST: Rs.{gst_val:,.2f} | Grand Total: Rs.{net_val:,.2f}")
+
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            if st.button("Save as Sale"):
+                save_transaction_data("sales", updated_items, invoice_no, party_name, st.session_state["username"])
+                st.success("Sale saved!")
+        with b2:
+            if st.button("Save as Purchase"):
+                save_transaction_data("purchase", updated_items, invoice_no, party_name, st.session_state["username"])
+                for itm in updated_items: add_master_product(itm["PRODUCT"], itm["PACK"], itm["MRP"], itm["RATE"], itm["GST"])
+                st.success("Purchase saved!")
+        with b3:
+            if st.button("Download PDF"):
+                pdf_bytes = generate_pdf_invoice(party_name, invoice_no, gstin_no, updated_items, sub_total, gst_val, net_val)
+                st.download_button("Click to Download PDF", data=pdf_bytes, file_name=f"{invoice_no}.pdf", mime="application/pdf")# ==========================================
 # MAIN APP FLOW - PART 3
 # ==========================================
 # 2. SALES HISTORY
 if active_tab == "Sales History":
-    st.markdown("# ==========================================
-# MAIN APP FLOW - PART 3
-# ==========================================
-# 2. SALES HISTORY
-if active_tab == "Sales History":
-    st.markdown("
+    st.markdown("<h2 style='color: #E65100;'>Sales History</h2>", unsafe_allow_html=True)
+    df = load_transaction_data("sales")
+    st.dataframe(df, use_container_width=True) if not df.empty else st.info("No records found.")
+
+# 3. PURCHASE HISTORY
+elif active_tab == "Purchase History (Stock In)":
+    st.markdown("<h2 style='color: #E65100;'>Purchase History</h2>", unsafe_allow_html=True)
+    df = load_transaction_data("purchase")
+    st.dataframe(df, use_container_width=True) if not df.empty else st.info("No records found.")
+
+# 4. LIVE STOCK SUMMARY
+elif active_tab == "Live Stock Summary":
+    st.markdown("<h2 style='color: #E65100;'>Live Stock Summary</h2>", unsafe_allow_html=True)
+    df = load_master_products()
+    st.dataframe(df, use_container_width=True) if not df.empty else st.info("Master list is empty.")
+
+# 5. USER MANAGEMENT
+elif active_tab == "User Management" and is_manager:
+    st.markdown("<h2 style='color: #E65100;'>User Management</h2>", unsafe_allow_html=True)
+    st.dataframe(pd.DataFrame([{"username": k, **v} for k, v in load_all_users().items()]), use_container_width=True)
+
+# 6. MANAGE MASTER PRODUCTS
+elif active_tab == "Manage Master Products" and is_manager:
+    st.markdown("<h2 style='color: #E65100;'>Manage Master Products</h2>", unsafe_allow_html=True)
+    edited_master = st.data_editor(load_master_products(), num_rows="dynamic", use_container_width=True)
+    if st.button("Save Master Changes"):
+        sync_entire_master_products(edited_master)
+        st.success("Updated successfully!")
