@@ -235,18 +235,6 @@ USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
 
 if not st.session_state["logged_in"]:
-    st.markdown("
-# ==========================================
-# MAIN APP FLOW
-# ==========================================
-if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
-if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
-if "extracted_party_name" not in st.session_state: st.session_state["extracted_party_name"] = "00"
-
-USERS_DB = load_all_users()
-MASTER_DF = load_master_products()
-
-if not st.session_state["logged_in"]:
     st.markdown("<h2 style='text-align: center; color: #E65100;'>SGB / LCB Pharma Wholesale ERP</h2>", unsafe_allow_html=True)
     c1, c2, c3 = st.columns([1, 2, 1])
     with c2:
