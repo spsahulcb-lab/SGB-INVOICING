@@ -18,7 +18,13 @@ st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", i
 
 st.markdown(
     """
-    
+    <style>
+    .stApp { background-color: #FFF9F5; }
+    .main-header { font-size: 26px; font-weight: bold; color: #E65100; text-align: center; margin-bottom: 20px; }
+    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #FB8C00; color: white; border: none; }
+    .stButton>button:hover { background-color: #EF6C00; color: white; }
+    [data-testid="stSidebar"] { background-color: #FFF0E6; }
+    </style>
     """,
     unsafe_allow_html=True
 )
@@ -224,6 +230,7 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_
     pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     return bytes(pdf.output())
+
 # ==========================================
 # MAIN APP FLOW
 # ==========================================
@@ -292,8 +299,13 @@ if active_tab == "AI Smart Scan & Billing":
         st.markdown("---")
         st.subheader("Current Billing Cart")
         
+        existing_parties = get_existing_parties()
+        extracted_p = st.session_state.get("extracted_party_name", "00")
+        party_options = sorted(list(set([extracted_p] + existing_parties + ["Cash Sales"])))
+        default_index = party_options.index(extracted_p) if extracted_p in party_options else 0
+
         c_p1, c_p2, c_p3 = st.columns([2, 2, 1])
-        with c_p1: party_name = st.selectbox("Party Name", options=list(set([st.session_state["extracted_party_name"]] + get_existing_parties() + ["Cash Sales"])))
+        with c_p1: party_name = st.selectbox("Party Name", options=party_options, index=default_index)
         with c_p2: invoice_no = st.text_input("Invoice Number", value=f"INV-{datetime.now().strftime('%Y%m%d%H%M')}")
         with c_p3: gstin_no = st.text_input("GSTIN", value="27AAAAA0000A1Z5")
 
