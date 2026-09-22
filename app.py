@@ -102,11 +102,6 @@ def sync_entire_master_products(edited_df):
             if records: supabase.table("master_products").insert(records).execute()
         except Exception: pass
 
-def auto_correct_brand(scanned_name, master_list):
-    if not scanned_name or str(scanned_name).strip() == "": return "Unknown Item"
-    matches = difflib.get_close_matches(scanned_name, master_list, n=1, cutoff=0.65)
-    return matches[0] if matches else scanned_name.strip()
-
 def save_transaction_data(table_name, items, invoice, party, sr_username):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     records = []
@@ -163,9 +158,6 @@ def get_existing_parties():
     p2 = pur_df['party'].dropna().unique().tolist() if not pur_df.empty else []
     return sorted(list(set(p1 + p2)))
 
-# ==========================================
-# GEMINI AI SETUP
-# ==========================================
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 
@@ -191,9 +183,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
         st.error(f"AI Error: {e}")
         return "00", []
 
-# ==========================================
-# PDF GENERATOR
-# ==========================================
 def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_val):
     pdf = FPDF()
     pdf.add_page()
@@ -234,10 +223,8 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_
     pdf.cell(190, 6, f"Sub Total: Rs. {sub_total:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    return bytes(pdf.output())
-
-# ==========================================
-# MAIN APP FLOW
+    return bytes(pdf.output())# ==========================================
+# MAIN APP FLOW - PART 2
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
 if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
@@ -247,4 +234,65 @@ USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
 
 if not st.session_state["logged_in"]:
+    st.markdown("if st.button("Auto-Extract via Gemini AI"):
+    if up_img or raw_txt:
+        with st.spinner("Processing..."):
+            party, items = process_bill_with_gemini(up_img, raw_txt, MASTER_DF)
+            st.session_state["extracted_party_name"] = party
+            st.session_state["scanned_cart"] = items
+            st.rerun()
+    else: st.warning("Please upload an image or enter text.")
+
+if st.session_state["scanned_cart"]:
+    st.markdown("---")
+    st.subheader("Current Billing Cart")
+    
+    c_p1, c_p2, c_p3 = st.columns([2, 2, 1])
+    with c_p1: party_name = st.selectbox("Party Name", options=list(set([st.session_state["extracted_party_name"]] + get_existing_parties() + ["Cash Sales"])))
+    with c_p2: invoice_no = st.text_input("Invoice Number", value=f"INV-{datetime.now().strftime('%Y%m%d%H%M')}")
+    with c_p3: gstin_no = st.text_input("GSTIN", value="27AAAAA0000A1Z5")
+
+    cart_df = pd.DataFrame(st.session_state["scanned_cart"])
+    edited_cart = st.data_editor(cart_df, num_rows="dynamic", use_container_width=True)
+    
+    sub_total, gst_val = 0.0, 0.0
+    updated_items = []
+    for _, row in edited_cart.iterrows():
+        qty = float(row.get("QTY", 0))
+        rate = float(row.get("RATE", 0))
+        gst_pct = float(row.get("GST", 5))
+        amt = qty * rate
+        sub_total += amt
+        gst_val += amt * (gst_pct / 100.0)
+        
+        r_dict = row.to_dict()
+        r_dict["AMOUNT"] = round(amt, 2)
+        updated_items.append(r_dict)
+
+    net_val = sub_total + gst_val
+    st.markdown(f"### Sub Total: Rs.{sub_total:,.2f} | GST: Rs.{gst_val:,.2f} | Grand Total: Rs.{net_val:,.2f}")
+
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        if st.button("Save as Sale"):
+            save_transaction_data("sales", updated_items, invoice_no, party_name, st.session_state["username"])
+            st.success("Sale saved!")
+    with b2:
+        if st.button("Save as Purchase"):
+            save_transaction_data("purchase", updated_items, invoice_no, party_name, st.session_state["username"])
+            for itm in updated_items: add_master_product(itm["PRODUCT"], itm["PACK"], itm["MRP"], itm["RATE"], itm["GST"])
+            st.success("Purchase saved!")
+    with b3:
+        if st.button("Download PDF"):
+            pdf_bytes = generate_pdf_invoice(party_name, invoice_no, gstin_no, updated_items, sub_total, gst_val, net_val)
+            st.download_button("Click to Download PDF", data=pdf_bytes, file_name=f"{invoice_no}.pdf", mime="application/pdf")# ==========================================
+# MAIN APP FLOW - PART 3
+# ==========================================
+# 2. SALES HISTORY
+if active_tab == "Sales History":
+    st.markdown("# ==========================================
+# MAIN APP FLOW - PART 3
+# ==========================================
+# 2. SALES HISTORY
+if active_tab == "Sales History":
     st.markdown("
