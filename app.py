@@ -18,13 +18,7 @@ st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", i
 
 st.markdown(
     """
-    <style>
-    .stApp { background-color: #FFF9F5; }
-    .main-header { font-size: 26px; font-weight: bold; color: #E65100; text-align: center; margin-bottom: 20px; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #FB8C00; color: white; border: none; }
-    .stButton>button:hover { background-color: #EF6C00; color: white; }
-    [data-testid="stSidebar"] { background-color: #FFF0E6; }
-    </style>
+    
     """,
     unsafe_allow_html=True
 )
@@ -232,6 +226,17 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_
     return bytes(pdf.output())
 
 # ==========================================
+# MAIN APP FLOW
+# ==========================================
+if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
+if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
+if "extracted_party_name" not in st.session_state: st.session_state["extracted_party_name"] = "00"
+
+USERS_DB = load_all_users()
+MASTER_DF = load_master_products()
+
+if not st.session_state["logged_in"]:
+    st.markdown("# ==========================================
 # MAIN APP FLOW
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
