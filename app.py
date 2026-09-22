@@ -224,7 +224,6 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_
     pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     return bytes(pdf.output())
-
 # ==========================================
 # MAIN APP FLOW
 # ==========================================
