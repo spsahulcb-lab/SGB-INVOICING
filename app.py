@@ -229,8 +229,10 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, sub_total, gst_val, net_
     pdf.cell(190, 6, f"Sub Total: Rs. {sub_total:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
     pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    return bytes(pdf.output())# ==========================================
-# MAIN APP FLOW - PART 2
+    return bytes(pdf.output())
+
+# ==========================================
+# MAIN APP FLOW
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
 if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
@@ -335,31 +337,43 @@ if active_tab == "AI Smart Scan & Billing":
         with b3:
             if st.button("Download PDF"):
                 pdf_bytes = generate_pdf_invoice(party_name, invoice_no, gstin_no, updated_items, sub_total, gst_val, net_val)
-                st.download_button("Click to Download PDF", data=pdf_bytes, file_name=f"{invoice_no}.pdf", mime="application/pdf")# ==========================================
-# MAIN APP FLOW - PART 3
-# ==========================================
+                st.download_button("Click to Download PDF", data=pdf_bytes, file_name=f"{invoice_no}.pdf", mime="application/pdf")
+
 # 2. SALES HISTORY
-if active_tab == "Sales History":
+elif active_tab == "Sales History":
     st.markdown("<h2 style='color: #E65100;'>Sales History</h2>", unsafe_allow_html=True)
     df = load_transaction_data("sales")
-    st.dataframe(df, use_container_width=True) if not df.empty else st.info("No records found.")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No records found.")
 
 # 3. PURCHASE HISTORY
 elif active_tab == "Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>Purchase History</h2>", unsafe_allow_html=True)
     df = load_transaction_data("purchase")
-    st.dataframe(df, use_container_width=True) if not df.empty else st.info("No records found.")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No records found.")
 
 # 4. LIVE STOCK SUMMARY
 elif active_tab == "Live Stock Summary":
     st.markdown("<h2 style='color: #E65100;'>Live Stock Summary</h2>", unsafe_allow_html=True)
     df = load_master_products()
-    st.dataframe(df, use_container_width=True) if not df.empty else st.info("Master list is empty.")
+    if not df.empty:
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("Master list is empty.")
 
 # 5. USER MANAGEMENT
 elif active_tab == "User Management" and is_manager:
     st.markdown("<h2 style='color: #E65100;'>User Management</h2>", unsafe_allow_html=True)
-    st.dataframe(pd.DataFrame([{"username": k, **v} for k, v in load_all_users().items()]), use_container_width=True)
+    users_data = load_all_users()
+    if users_data:
+        st.dataframe(pd.DataFrame([{"username": k, **v} for k, v in users_data.items()]), use_container_width=True)
+    else:
+        st.info("No users found.")
 
 # 6. MANAGE MASTER PRODUCTS
 elif active_tab == "Manage Master Products" and is_manager:
@@ -367,4 +381,4 @@ elif active_tab == "Manage Master Products" and is_manager:
     edited_master = st.data_editor(load_master_products(), num_rows="dynamic", use_container_width=True)
     if st.button("Save Master Changes"):
         sync_entire_master_products(edited_master)
-        st.success("Updated successfully!")
+        st.success("Master products updated successfully!")
