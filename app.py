@@ -462,7 +462,7 @@ if st.sidebar.button("🚪 Logout"):
 # ==========================================
 if active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
-        if st.button("✨ Auto-Extract via Gemini AI"):
+    if st.button("✨ Auto-Extract via Gemini AI"):
         if up_img or raw_txt:
             with st.spinner("Scanning Document & Auto-Detecting Party & Products..."):
                 party, items = process_bill_with_gemini(up_img, raw_txt, MASTER_DF)
