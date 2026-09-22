@@ -1,10 +1,10 @@
-import sqlite3
-import pandas as pd
 import streamlit as st
-from datetime import datetime, date, timedelta
+import pandas as pd
+from datetime import datetime
 from fpdf import FPDF
 import urllib.parse
 import json
+import sqlite3
 import re
 import difflib
 import google.generativeai as genai
@@ -36,27 +36,47 @@ def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
+    # Create tables if not exist
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT, sr_username TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, batch TEXT, expiry TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT, sr_username TEXT)''')
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS users 
                  (username TEXT PRIMARY KEY, password TEXT, name TEXT, role TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
+    # Auto Migration for sales & purchase tables
     for tbl in ["sales", "purchase"]:
-        for col, dtype in [("sr_username", "TEXT"), ("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
+        for col, dtype in [("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
             except Exception: pass
             
+    # Auto Migration for master_products
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
         except Exception: pass
     
+    # Default Users
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
+    defaults = [
+        ("ATPLEX Syrup", "200ml", 145.0, 75.0, 12.0),
+        ("Duty Beauty MINUS 16 Cream", "50gm", 450.0, 220.0, 18.0),
+        ("Duty Beauty Glutathione Soap", "75gm", 195.0, 95.0, 18.0),
+        ("Duty Beauty Facewash", "100ml", 220.0, 110.0, 18.0),
+        ("Kabja Band", "100gm", 120.0, 60.0, 12.0),
+        ("Cartibot", "1x10", 350.0, 180.0, 12.0),
+        ("Virload", "1x10", 280.0, 140.0, 12.0),
+        ("Womensa Syrup", "200ml", 160.0, 80.0, 12.0),
+        ("Panchaliv Syrup", "200ml", 135.0, 68.0, 12.0),
+        ("Alobyd-P", "1x10", 95.0, 45.0, 12.0)
+    ]
+    for p in defaults:
+        try: c.execute("INSERT OR IGNORE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", p)
+        except Exception: pass
+        
     conn.commit()
     conn.close()
 
@@ -111,6 +131,19 @@ def delete_master_product(product_name):
     conn.commit()
     conn.close()
 
+def bulk_upload_master_products(records):
+    if supabase:
+        try: supabase.table("master_products").insert(records).execute()
+        except Exception: pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    for item in records:
+        c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", 
+                  (item["product_name"], item.get("pack", ""), item.get("mrp", 0.0), item.get("rate", 0.0), item.get("tax", 12.0)))
+    conn.commit()
+    conn.close()
+
 def sync_entire_master_products(edited_df):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -120,12 +153,12 @@ def sync_entire_master_products(edited_df):
     for _, r in edited_df.iterrows():
         p_name = str(r.get("product_name", "")).strip()
         if p_name and p_name.lower() != "nan":
-            pack = str(r.get("pack", "00"))
+            pack = str(r.get("pack", ""))
             mrp = clean_float(r.get("mrp"), 0.0)
-            tax = clean_float(r.get("tax"), 5.0)
-            rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
+            rate = clean_float(r.get("rate"), 0.0)
+            tax = clean_float(r.get("tax"), 12.0)
             
-            c.execute("INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+            c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
                       (p_name, pack, mrp, rate, tax))
             records.append({"product_name": p_name, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax})
             
@@ -145,7 +178,7 @@ def auto_correct_brand(scanned_name, master_list):
     matches = difflib.get_close_matches(scanned_name, master_list, n=1, cutoff=0.65)
     return matches[0] if matches else scanned_name.strip()
 
-def save_transaction_data(table_name, items, invoice, party, sr_username):
+def save_transaction_data(table_name, items, invoice, party):
     today = datetime.now().strftime("%Y-%m-%d %H:%M")
     records = []
     for row in items:
@@ -153,19 +186,16 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
             "invoice": invoice,
             "party": party,
             "product": row.get('PRODUCT', ''),
-            "pack": row.get('PACK', '00'),
-            "batch": str(row.get('BATCH', '00')),
-            "expiry": str(row.get('EXPIRY', '00')),
+            "pack": row.get('PACK', ''),
             "qty": float(row.get('QTY', 0)),
-            "free_qty": str(row.get('DEAL/FREE', '00')),
+            "free_qty": str(row.get('DEAL/FREE', '')),
             "mrp": float(row.get('MRP', 0)),
             "disc_pct": float(row.get('DISC (%)', 0)),
             "disc_rs": float(row.get('DISC (₹)', 0)),
             "rate": float(row.get('RATE', 0)),
-            "gst": float(row.get('GST', 5.0)),
+            "gst": float(row.get('GST', 0)),
             "amount": float(row.get('AMOUNT', 0)),
-            "created_at": today,
-            "sr_username": sr_username
+            "created_at": today
         })
     
     if supabase:
@@ -175,9 +205,9 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     for r in records:
-        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, batch, expiry, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at, sr_username)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                  (r["invoice"], r["party"], r["product"], r["pack"], r["batch"], r["expiry"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"], r["sr_username"]))
+        c.execute(f'''INSERT INTO {table_name} (invoice, party, product, pack, qty, free_qty, mrp, disc_pct, disc_rs, rate, gst, amount, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (r["invoice"], r["party"], r["product"], r["pack"], r["qty"], r["free_qty"], r["mrp"], r["disc_pct"], r["disc_rs"], r["rate"], r["gst"], r["amount"], r["created_at"]))
     conn.commit()
     conn.close()
 
@@ -239,32 +269,6 @@ def clean_float(val, default=0.0):
         except ValueError: return default
     return default
 
-def filter_by_date_range(df, start_date, end_date, date_col='created_at'):
-    if df.empty or date_col not in df.columns:
-        return df
-    temp_dates = pd.to_datetime(df[date_col], errors='coerce').dt.date
-    s_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
-    e_date = end_date if isinstance(end_date, date) else pd.to_datetime(end_date).date()
-    return df[(temp_dates >= s_date) & (temp_dates <= e_date)]
-
-def get_existing_parties():
-    sales_df = load_transaction_data("sales")
-    pur_df = load_transaction_data("purchase")
-    p1 = sales_df['party'].dropna().unique().tolist() if not sales_df.empty else []
-    p2 = pur_df['party'].dropna().unique().tolist() if not pur_df.empty else []
-    return sorted(list(set(p1 + p2)))
-
-def get_latest_batch_expiry(product_name):
-    df_pur = load_transaction_data("purchase")
-    if not df_pur.empty and 'product' in df_pur.columns:
-        prod_pur = df_pur[df_pur['product'] == product_name]
-        if not prod_pur.empty:
-            latest_row = prod_pur.iloc[0]
-            batch = str(latest_row.get('batch', '00'))
-            expiry = str(latest_row.get('expiry', '00'))
-            return batch if batch and batch != 'nan' else '00', expiry if expiry and expiry != 'nan' else '00'
-    return '00', '00'
-
 # ==========================================
 # GEMINI AI SETUP
 # ==========================================
@@ -273,17 +277,17 @@ if "GEMINI_API_KEY" in st.secrets:
 
 def process_bill_with_gemini(uploaded_file, text_input, master_df):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-3.5-flash-lite')
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
-        You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip including Batch and Expiry Date.
+        You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip.
         Master Reference Product List: {", ".join(master_list)}
 
         Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
         JSON format:
         [
-          {{"PRODUCT": "Item Name", "PACK": "00", "BATCH": "00", "EXPIRY": "00", "QTY": 0, "DEAL": "00", "MRP": 0.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 0.0, "GST": 5.0}}
+          {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12.0}}
         ]
         """
         if uploaded_file:
@@ -305,11 +309,9 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             corrected_prod = auto_correct_brand(raw_prod, master_list)
             m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
             
-            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "00")
-            batch = str(item.get("BATCH", "00"))
-            expiry = str(item.get("EXPIRY", "00"))
-            qty = clean_float(item.get("QTY"), default=0.0)
-            deal = str(item.get("DEAL", "00"))
+            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
+            qty = clean_float(item.get("QTY"), default=1.0)
+            deal = str(item.get("DEAL", "NA"))
             
             mrp = clean_float(item.get("MRP"), default=0.0)
             if mrp == 0.0 and not m_match.empty:
@@ -318,14 +320,20 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             disc_pct = clean_float(item.get("DISC_PCT"), default=0.0)
             disc_rs = clean_float(item.get("DISC_RS"), default=0.0)
 
-            gst = clean_float(item.get("GST"), default=5.0)
             rate = clean_float(item.get("RATE"), default=0.0)
+            if rate == 0.0 and not m_match.empty:
+                rate = clean_float(m_match["rate"].values[0])
+            
+            if disc_pct > 0 or disc_rs > 0:
+                gst = 0.0
+            else:
+                gst = clean_float(item.get("GST"), default=12.0)
             
             if rate == 0.0 and mrp > 0:
                 if disc_pct > 0:
                     rate = round(mrp * (1 - (disc_pct / 100.0)), 2)
                 else:
-                    rate = round((mrp * 80.0) / (100.0 + gst), 2)
+                    rate = round((mrp * 80.0) / 118.0, 2) if gst == 18.0 else round((mrp * 80.0) / 105.0, 2)
                 
             eff_rate = rate - disc_rs
             if disc_pct > 0 and disc_rs == 0:
@@ -336,8 +344,6 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             cleaned_data.append({
                 "PRODUCT": corrected_prod,
                 "PACK": pack,
-                "BATCH": batch,
-                "EXPIRY": expiry,
                 "QTY": qty,
                 "DEAL/FREE": deal,
                 "MRP": mrp,
@@ -366,29 +372,27 @@ def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, su
     pdf.ln(5)
     
     pdf.set_font("Helvetica", 'B', 8)
-    pdf.cell(35, 7, "Product", 1)
-    pdf.cell(12, 7, "Pack", 1)
-    pdf.cell(15, 7, "Batch", 1)
-    pdf.cell(12, 7, "Exp", 1)
-    pdf.cell(12, 7, "Qty", 1)
-    pdf.cell(12, 7, "Deal", 1)
-    pdf.cell(18, 7, "MRP (Rs)", 1)
-    pdf.cell(16, 7, "Disc(%)", 1)
-    pdf.cell(18, 7, "Rate (Rs)", 1)
+    pdf.cell(45, 7, "Product", 1)
+    pdf.cell(15, 7, "Pack", 1)
+    pdf.cell(15, 7, "Qty", 1)
+    pdf.cell(15, 7, "Deal", 1)
+    pdf.cell(20, 7, "MRP (Rs)", 1)
+    pdf.cell(20, 7, "Disc(%)", 1)
+    pdf.cell(20, 7, "Disc(Rs)", 1)
+    pdf.cell(20, 7, "Rate (Rs)", 1)
     pdf.cell(20, 7, "Amount", 1)
     pdf.ln()
     
     pdf.set_font("Helvetica", '', 8)
     for row in cart_data:
-        pdf.cell(35, 6, str(row['PRODUCT'])[:18], 1)
-        pdf.cell(12, 6, str(row.get('PACK', '00'))[:6], 1)
-        pdf.cell(15, 6, str(row.get('BATCH', '00'))[:8], 1)
-        pdf.cell(12, 6, str(row.get('EXPIRY', '00'))[:6], 1)
-        pdf.cell(12, 6, str(row['QTY']), 1)
-        pdf.cell(12, 6, str(row.get('DEAL/FREE', '')), 1)
-        pdf.cell(18, 6, f"{float(row['MRP']):.2f}", 1)
-        pdf.cell(16, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
-        pdf.cell(18, 6, f"{float(row['RATE']):.2f}", 1)
+        pdf.cell(45, 6, str(row['PRODUCT'])[:22], 1)
+        pdf.cell(15, 6, str(row.get('PACK', ''))[:8], 1)
+        pdf.cell(15, 6, str(row['QTY']), 1)
+        pdf.cell(15, 6, str(row.get('DEAL/FREE', '')), 1)
+        pdf.cell(20, 6, f"{float(row['MRP']):.2f}", 1)
+        pdf.cell(20, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
+        pdf.cell(20, 6, f"{float(row.get('DISC (₹)', 0)):.2f}", 1)
+        pdf.cell(20, 6, f"{float(row['RATE']):.2f}", 1)
         pdf.cell(20, 6, f"{float(row['AMOUNT']):.2f}", 1)
         pdf.ln()
         
@@ -406,7 +410,7 @@ if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
 
 USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
-MASTER_LIST = ["00"] + (MASTER_DF["product_name"].tolist() if not MASTER_DF.empty else [])
+MASTER_LIST = MASTER_DF["product_name"].tolist() if not MASTER_DF.empty else []
 
 if not st.session_state["logged_in"]:
     st.markdown("<h2 class='main-header'>🍊 SGB / LCB Pharma Wholesale ERP</h2>", unsafe_allow_html=True)
@@ -424,8 +428,6 @@ if not st.session_state["logged_in"]:
     st.stop()
 
 logged_user = st.session_state["logged_user"]
-is_manager = logged_user["role"] == "Manager"
-
 st.sidebar.title(f"🍊 {logged_user['name']}")
 st.sidebar.caption(f"Role: {logged_user['role']}")
 
@@ -433,10 +435,10 @@ nav_options = [
     "🤖 AI Smart Scan & Billing",
     "📦 Sales History",
     "📥 Purchase History (Stock In)",
-    "🏭 Live Stock & Quantity-Value Summary"
+    "🏭 Batch Stock & Expiry Alert"
 ]
 
-if is_manager:
+if logged_user["role"] == "Manager":
     nav_options.append("👥 User Management (Admin)")
     nav_options.append("🏷️ Manage Master Products")
 
@@ -447,9 +449,6 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state["scanned_cart"] = []
     st.rerun()
 
-# ==========================================
-# 1. AI SMART SCAN & BILLING
-# ==========================================
 if active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
     
@@ -466,13 +465,15 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     st.success(f"✅ Successfully Extracted {len(items)} Items!")
                     st.rerun()
                 else:
-                    st.error("❌ Could not extract items.")
+                    st.error("❌ Could not extract items. Please make sure image is readable or try pasting bill text.")
         else: st.warning("Please upload a slip image or paste text.")
 
-        st.markdown(f"""
-            <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
-                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
-                <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-        
+    st.markdown("---")
+    
+    st.subheader("📝 Wholesale Bill Meta Info")
+    f1, f2, f3 = st.columns(3)
+    with f1: party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
+    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
+    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
+
+    st.markdown("##### ➕ Manual Item Addi
