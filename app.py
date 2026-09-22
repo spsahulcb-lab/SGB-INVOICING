@@ -469,4 +469,10 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     st.error("❌ Could not extract items.")
         else: st.warning("Please upload a slip image or paste text.")
 
-    st.markdown("
+        st.markdown(f"""
+            <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
+                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
+                <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
+            </div>
+        """, unsafe_allow_html=True)
+        
