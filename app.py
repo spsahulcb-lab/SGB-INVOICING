@@ -235,8 +235,8 @@ USERS_DB = load_all_users()
 MASTER_DF = load_master_products()
 
 if not st.session_state["logged_in"]:
-    st.markdown
-    ("# ==========================================
+    st.markdown("
+    # ==========================================
 # MAIN APP FLOW
 # ==========================================
 if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
