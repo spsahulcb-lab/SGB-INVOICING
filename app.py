@@ -457,17 +457,13 @@ if st.sidebar.button("🚪 Logout"):
     st.session_state["extracted_party_name"] = "00"
     st.rerun()
 
-# ==========================================
-# 1. AI SMART SCAN & BILLING
-# ==========================================
-if active_tab == "🤖 AI Smart Scan & Billing":
-    st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
-    
-    c1, c2 = st.columns(2)
-    with c1: uploaded_img = st.file_uploader("📷 Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"])
-    with c2: raw_text = st.text_area("✍️ Or Paste Text Invoice Data")
-        
     if st.button("✨ Auto-Extract via Gemini AI"):
-        if uploaded_img or raw_text:
-            with st.spinner("Scanning Document & Auto-Detecting Party & Products..."):
+        if up_img or raw_text:
+            with st.spinner("Processing..."):
+                party, items = process_bill_with_gemini(up_img, raw_text, MASTER_DF)
+                st.session_state["extracted_party_name"] = party
+                st.session_state["scanned_cart"] = items
+                st.rerun()
+        else:
+            st.warning("Please upload an image or enter text.")
             
