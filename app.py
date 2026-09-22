@@ -273,7 +273,7 @@ if "GEMINI_API_KEY" in st.secrets:
 
 def process_bill_with_gemini(uploaded_file, text_input, master_df):
     try:
-        model = genai.GenerativeModel('gemini-3.5-flash-lite')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
@@ -469,4 +469,4 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     st.error("❌ Could not extract items.")
         else: st.warning("Please upload a slip image or paste text.")
 
-    st.markd
+    st.markdown("
