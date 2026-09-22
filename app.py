@@ -16,9 +16,12 @@ from supabase import create_client, Client
 # ==========================================
 st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", initial_sidebar_state="expanded")
 
-st.markdown("""
+st.markdown(
+    """
     
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True
+)
 
 # ==========================================
 # HYBRID DATABASE SETUP (SUPABASE + LOCAL SQLITE)
