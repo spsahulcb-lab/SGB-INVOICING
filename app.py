@@ -528,54 +528,9 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             net_val = (sub_total - extra_bill_disc) + gst_val
         else:
             sub_total = total_mrp_sum = gst_val = net_val = 0.0
-        
-        st.markdown(f"""
-🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
-💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
-""", unsafe_allow_html=True)
-st.markdown("
-
-
-", unsafe_allow_html=True)
-
-    save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
-    
-    with save_col1:
-        if st.button("📤 Save SALES"):
-            save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name)
-            st.success("✅ Saved to Sales Database!")
-            st.session_state["scanned_cart"] = []
-            st.rerun()
-
-    with save_col2:
-        if st.button("📥 Save PURCHASE"):
-            save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name)
-            st.success("✅ Saved to Purchase Database!")
-            st.session_state["scanned_cart"] = []
-            st.rerun()
-
-    with save_col3:
-        try:
-            pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, extra_bill_disc, sub_total, gst_val, net_val)
-            st.download_button(label="📄 Download PDF", data=pdf_bytes, file_name=f"{inv_no}.pdf", mime="application/pdf")
-        except Exception as pdf_err: st.error(f"PDF Error: {pdf_err}")
-
-    with save_col4:
-        msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
-        for row in st.session_state["scanned_cart"]:
-            msg += f"• {row['PRODUCT']} - {row['QTY']} Qty @ ₹{row['RATE']}\n"
-        
-        wa_encoded = urllib.parse.quote(msg)
-        wa_url = f"https://api.whatsapp.com/send?text={wa_encoded}"
-        
-        btn_html = (
-            f'['
-            f'📲 WhatsApp]({wa_url})'
-        )
-        st.markdown(btn_html, unsafe_allow_html=True)
-
-    with save_col5:
-        if st.button("🗑️ Clear Entire List"):
-            st.session_state["scanned_cart"] = []
-            st.rerun()
-        
+                st.markdown(f"""
+            <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
+                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
+                <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
+            </div>
+        """, unsafe_allow_html=True)
