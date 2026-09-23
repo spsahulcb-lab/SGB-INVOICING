@@ -527,10 +527,12 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
             net_val = (sub_total - extra_bill_disc) + gst_val
         else:
-            sub_total = total_mrp_sum = gst_val = net_val = 0.0
-                st.markdown(f"""
-            <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
-                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
-                <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
-            </div>
-        """, unsafe_allow_html=True)
+           sub_total = float(edited_df["AMOUNT"].sum())
+        total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
+        gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
+        net_val = (sub_total - extra_bill_disc) + gst_val
+
+        st.markdown(f"""
+🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
+💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
+    """, unsafe_allow_html=True)
