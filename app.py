@@ -471,26 +471,28 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     st.markdown("---")
     
-    st.subheader("📝 Wholesale Bill Meta Info")
+    st.subheader("📝 Wholesale Bill Meta Info (Fully Editable)")
     f1, f2, f3 = st.columns(3)
     
     existing_parties = get_existing_parties()
     with f1:
         party_mode = st.radio("Party Input Mode:", ["Select Saved Party", "Type New Party"], horizontal=True)
         if party_mode == "Select Saved Party" and existing_parties:
-            party_name = st.selectbox("Select Party / Medical Store", existing_parties)
+            sel_saved_party = st.selectbox("Select Party / Medical Store", existing_parties)
+            party_name = st.text_input("Or Edit Party Name", value=sel_saved_party)
         else:
-            party_name = st.text_input("Party / Supplier / Medical Store Name", value="00")
+            party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
             
-    with f2: inv_no = st.text_input("Invoice No", value="00")
-    with f3: gst_no = st.text_input("Party GSTIN", value="00")
+    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
+    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
 
-    st.markdown("##### ➕ Manual Item Addition")
-    rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
+    st.markdown("##### ➕ Compact Manual Item Addition")
+    rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
 
-    if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
-        with st.form("net_billing_form"):
-            sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST, index=0)
+    if rate_mode == "NET RATE Mode (0% GST)":
+        with st.form("net_billing_form", clear_on_submit=False):
+            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
+            sel_prod = st.selectbox("Select Product", MASTER_LIST, index=0)
             
             def_pack = "00"
             def_mrp = 0.0
@@ -502,15 +504,20 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             
             def_batch, def_exp = get_latest_batch_expiry(sel_prod)
 
-            p1, p2, p3, p4, p5, p6 = st.columns(6)
-            with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
-            with p2: m_pack = st.text_input("Pack", value=def_pack)
-            with p3: m_batch = st.text_input("Batch", value=def_batch)
-            with p4: m_exp = st.text_input("Expiry", value=def_exp)
-            with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
-            with p6: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
+            r1_c1, r1_c2, r1_c3 = st.columns(3)
+            with r1_c1: s_qty = st.number_input("Qty", min_value=0, value=1)
+            with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
+            with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
+
+            r2_c1, r2_c2 = st.columns(2)
+            with r2_c1: m_batch = st.text_input("Batch", value=def_batch)
+            with r2_c2: m_exp = st.text_input("Expiry", value=def_exp)
             
-            submitted_net = st.form_submit_button("➕ Add Net Item")
+            s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
+            
+            submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
+            st.markdown("</div>", unsafe_allow_html=True)
+
             if submitted_net:
                 calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
                 amt = float(s_qty) * calc_net_rate
@@ -522,8 +529,9 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 })
                 st.rerun()
     else:
-        with st.form("gross_billing_form"):
-            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
+        with st.form("gross_billing_form", clear_on_submit=False):
+            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
+            sel_prod = st.selectbox("Select Product", MASTER_LIST, index=0)
             
             def_pack = "00"
             def_mrp = 0.0
@@ -535,17 +543,22 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             
             def_batch, def_exp = get_latest_batch_expiry(sel_prod)
 
-            p1, p2, p3, p4, p5, p6, p7, p8 = st.columns(8)
-            with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
-            with p2: m_pack = st.text_input("Pack", value=def_pack)
-            with p3: m_batch = st.text_input("Batch", value=def_batch)
-            with p4: m_exp = st.text_input("Expiry", value=def_exp)
-            with p5: s_deal = st.text_input("Deal", value="00")
-            with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
-            with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
-            with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
+            with r1_c1: s_qty = st.number_input("Qty", min_value=0, value=1)
+            with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
+            with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
+            with r1_c4: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+
+            r2_c1, r2_c2, r2_c3 = st.columns(3)
+            with r2_c1: m_batch = st.text_input("Batch", value=def_batch)
+            with r2_c2: m_exp = st.text_input("Expiry", value=def_exp)
+            with r2_c3: s_deal = st.text_input("Deal", value="00")
             
-            submitted_gross = st.form_submit_button("➕ Add Gross Item")
+            s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+            
+            submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
+            st.markdown("</div>", unsafe_allow_html=True)
+
             if submitted_gross:
                 if s_disc_pct > 0:
                     calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
@@ -562,7 +575,8 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     if st.session_state["scanned_cart"]:
         st.markdown("---")
-        st.subheader("🛒 Current Bill Items")
+        st.subheader("🛒 Current Bill Items (Fully Editable Table)")
+        st.info("💡 Aap table ke kisi bhi column (Product, Pack, Batch, Expiry, Qty, MRP, Rate, GST) par click karke direct edit kar sakte hain!")
         
         cart_df = pd.DataFrame(st.session_state["scanned_cart"])
         
@@ -570,10 +584,14 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             cart_df, 
             key="cart_editor", 
             num_rows="dynamic",
-            disabled=["AMOUNT"], 
             use_container_width=True
         )
         
+        for idx, row in edited_df.iterrows():
+            q = clean_float(row.get('QTY', 0))
+            rt = clean_float(row.get('RATE', 0))
+            edited_df.loc[idx, 'AMOUNT'] = round(q * rt, 2)
+
         st.session_state["scanned_cart"] = edited_df.to_dict('records')
         
         o_col1, o_col2 = st.columns([2, 1])
@@ -622,7 +640,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
                 msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','00')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
-            wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
+            wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
 
         with save_col5:
