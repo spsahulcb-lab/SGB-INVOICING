@@ -478,4 +478,103 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     st.markdown("##### ➕ Manual Item Addition")
     p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 1, 1, 1, 1, 1, 1, 1])
-    with p1: sel_prod = st.selectbox("Product", MASTER_LIST if MASTER_LIST els
+    with p1: 
+        sel_options = MASTER_LIST if MASTER_LIST else ["Select Product"]
+        sel_prod = st.selectbox("Product", sel_options)
+    with p2: m_pack = st.text_input("Pack", value="10x10")
+    with p3: s_qty = st.number_input("Qty", min_value=1, value=10)
+    with p4: s_deal = st.text_input("Deal/Free", value="NA")
+    with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=150.0)
+    with p6: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+    with p7: s_disc_rs = st.number_input("Disc (₹)", min_value=0.0, value=0.0)
+    with p8:
+        auto_gst = 0.0 if (s_disc_pct > 0 or s_disc_rs > 0) else 12.0
+        calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)) - s_disc_rs, 2)
+        st.write(f"**Rate:** ₹{calc_rate}")
+        if st.button("➕ Add"):
+            amt = float(s_qty) * calc_rate
+            st.session_state["scanned_cart"].append({
+                "PRODUCT": sel_prod, "PACK": m_pack, "QTY": float(s_qty), "DEAL/FREE": s_deal,
+                "MRP": float(s_mrp), "DISC (%)": float(s_disc_pct), "DISC (₹)": float(s_disc_rs),
+                "RATE": calc_rate, "GST": auto_gst, "AMOUNT": round(amt, 2)
+            })
+            st.rerun()
+
+    if st.session_state["scanned_cart"]:
+        st.markdown("---")
+        st.subheader("🛒 Current Bill Items")
+        
+        cart_df = pd.DataFrame(st.session_state["scanned_cart"])
+        
+        edited_df = st.data_editor(
+            cart_df, 
+            key="cart_editor", 
+            num_rows="dynamic",
+            disabled=["AMOUNT"], 
+            use_container_width=True
+        )
+        
+        st.session_state["scanned_cart"] = edited_df.to_dict('records')
+        
+        o_col1, o_col2 = st.columns([2, 1])
+        with o_col2:
+            extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
+        
+        if not edited_df.empty:
+            sub_total = float(edited_df["AMOUNT"].sum())
+            total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
+            
+            gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
+            net_val = (sub_total - extra_bill_disc) + gst_val
+        else:
+            sub_total = total_mrp_sum = gst_val = net_val = 0.0
+        
+        st.markdown(f"""
+🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
+💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
+""", unsafe_allow_html=True)
+st.markdown("
+
+
+", unsafe_allow_html=True)
+
+    save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
+    
+    with save_col1:
+        if st.button("📤 Save SALES"):
+            save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name)
+            st.success("✅ Saved to Sales Database!")
+            st.session_state["scanned_cart"] = []
+            st.rerun()
+
+    with save_col2:
+        if st.button("📥 Save PURCHASE"):
+            save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name)
+            st.success("✅ Saved to Purchase Database!")
+            st.session_state["scanned_cart"] = []
+            st.rerun()
+
+    with save_col3:
+        try:
+            pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, extra_bill_disc, sub_total, gst_val, net_val)
+            st.download_button(label="📄 Download PDF", data=pdf_bytes, file_name=f"{inv_no}.pdf", mime="application/pdf")
+        except Exception as pdf_err: st.error(f"PDF Error: {pdf_err}")
+
+    with save_col4:
+        msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
+        for row in st.session_state["scanned_cart"]:
+            msg += f"• {row['PRODUCT']} - {row['QTY']} Qty @ ₹{row['RATE']}\n"
+        
+        wa_encoded = urllib.parse.quote(msg)
+        wa_url = f"https://api.whatsapp.com/send?text={wa_encoded}"
+        
+        btn_html = (
+            f'['
+            f'📲 WhatsApp]({wa_url})'
+        )
+        st.markdown(btn_html, unsafe_allow_html=True)
+
+    with save_col5:
+        if st.button("🗑️ Clear Entire List"):
+            st.session_state["scanned_cart"] = []
+            st.rerun()
