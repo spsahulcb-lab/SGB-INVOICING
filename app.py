@@ -14,17 +14,14 @@ from supabase import create_client, Client
 # ==========================================
 # PAGE CONFIG & STYLING (ORANGE THEME)
 # ==========================================
-st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="SGB / LCB Pharma Wholesale ERP",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 st.markdown("""
-    <style>
-    .stApp { background-color: #FFF9F5; }
-    .main-header { font-size: 26px; font-weight: bold; color: #E65100; text-align: center; margin-bottom: 20px; }
-    .stButton>button { width: 100%; border-radius: 8px; font-weight: bold; background-color: #FB8C00; color: white; border: none; }
-    .stButton>button:hover { background-color: #EF6C00; color: white; }
-    .ai-box { background-color: #FFF3E0; padding: 18px; border-radius: 10px; border-left: 6px solid #F57C00; margin-bottom: 20px; }
-    [data-testid="stSidebar"] { background-color: #FFF0E6; }
-    </style>
+    
 """, unsafe_allow_html=True)
 
 # ==========================================
@@ -36,7 +33,6 @@ def init_local_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     
-    # Create tables if not exist
     c.execute('''CREATE TABLE IF NOT EXISTS sales 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, invoice TEXT, party TEXT, product TEXT, pack TEXT, qty REAL, free_qty TEXT, mrp REAL, disc_pct REAL, disc_rs REAL, rate REAL, gst REAL, amount REAL, created_at TEXT)''')
     c.execute('''CREATE TABLE IF NOT EXISTS purchase 
@@ -46,18 +42,15 @@ def init_local_db():
     c.execute('''CREATE TABLE IF NOT EXISTS master_products 
                  (id INTEGER PRIMARY KEY AUTOINCREMENT, product_name TEXT UNIQUE, pack TEXT, mrp REAL, rate REAL, tax REAL)''')
     
-    # Auto Migration for sales & purchase tables
     for tbl in ["sales", "purchase"]:
         for col, dtype in [("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
             except Exception: pass
             
-    # Auto Migration for master_products
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
         except Exception: pass
     
-    # Default Users
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
@@ -277,14 +270,14 @@ if "GEMINI_API_KEY" in st.secrets:
 
 def process_bill_with_gemini(uploaded_file, text_input, master_df):
     try:
-        model = genai.GenerativeModel('gemini-3.5-flash-lite')
+        model = genai.GenerativeModel('gemini-1.5-flash')
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
         You are a pharma ERP assistant. Extract ALL medicine line items accurately from this invoice/order slip.
         Master Reference Product List: {", ".join(master_list)}
 
-        Output ONLY a raw valid JSON array. No preamble, no markdown tags (do NOT wrap in ```json).
+        Output ONLY a raw valid JSON array. No preamble, no markdown tags.
         JSON format:
         [
           {{"PRODUCT": "Item Name", "PACK": "10x10", "QTY": 10, "DEAL": "10+2", "MRP": 100.0, "DISC_PCT": 0.0, "DISC_RS": 0.0, "RATE": 50.0, "GST": 12.0}}
@@ -297,183 +290,4 @@ def process_bill_with_gemini(uploaded_file, text_input, master_df):
             response = model.generate_content([prompt, text_input])
             
         clean_txt = response.text.replace("```json", "").replace("```", "").strip()
-        json_match = re.search(r'\[.*\]', clean_txt, re.DOTALL)
-        if json_match:
-            clean_txt = json_match.group(0)
-            
-        data = json.loads(clean_txt)
-        
-        cleaned_data = []
-        for item in data:
-            raw_prod = str(item.get("PRODUCT", "")).strip()
-            corrected_prod = auto_correct_brand(raw_prod, master_list)
-            m_match = master_df[master_df["product_name"] == corrected_prod] if not master_df.empty else pd.DataFrame()
-            
-            pack = str(item.get("PACK", "")) or (m_match["pack"].values[0] if not m_match.empty else "")
-            qty = clean_float(item.get("QTY"), default=1.0)
-            deal = str(item.get("DEAL", "NA"))
-            
-            mrp = clean_float(item.get("MRP"), default=0.0)
-            if mrp == 0.0 and not m_match.empty:
-                mrp = clean_float(m_match["mrp"].values[0])
-
-            disc_pct = clean_float(item.get("DISC_PCT"), default=0.0)
-            disc_rs = clean_float(item.get("DISC_RS"), default=0.0)
-
-            rate = clean_float(item.get("RATE"), default=0.0)
-            if rate == 0.0 and not m_match.empty:
-                rate = clean_float(m_match["rate"].values[0])
-            
-            if disc_pct > 0 or disc_rs > 0:
-                gst = 0.0
-            else:
-                gst = clean_float(item.get("GST"), default=12.0)
-            
-            if rate == 0.0 and mrp > 0:
-                if disc_pct > 0:
-                    rate = round(mrp * (1 - (disc_pct / 100.0)), 2)
-                else:
-                    rate = round((mrp * 80.0) / 118.0, 2) if gst == 18.0 else round((mrp * 80.0) / 105.0, 2)
-                
-            eff_rate = rate - disc_rs
-            if disc_pct > 0 and disc_rs == 0:
-                eff_rate = rate * (1 - (disc_pct / 100.0))
-                
-            amt = qty * eff_rate
-            
-            cleaned_data.append({
-                "PRODUCT": corrected_prod,
-                "PACK": pack,
-                "QTY": qty,
-                "DEAL/FREE": deal,
-                "MRP": mrp,
-                "DISC (%)": disc_pct,
-                "DISC (₹)": disc_rs,
-                "RATE": round(rate, 2),
-                "GST": gst,
-                "AMOUNT": round(amt, 2)
-            })
-        return cleaned_data
-    except Exception as e:
-        st.error(f"AI Extraction Error: {e}")
-        return []
-
-# ==========================================
-# PDF GENERATOR
-# ==========================================
-def generate_pdf_invoice(party, inv, gst_no, cart_data, total_mrp, bill_disc, sub_total, gst_val, net_val):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(190, 10, "SGB / LCB PHARMA WHOLESALE INVOICE", new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.set_font("Helvetica", '', 10)
-    pdf.cell(190, 6, f"Party: {party} | GSTIN: {gst_no}", new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.cell(190, 6, f"Invoice No: {inv} | Date: {datetime.now().strftime('%d-%m-%Y')}", new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.ln(5)
-    
-    pdf.set_font("Helvetica", 'B', 8)
-    pdf.cell(45, 7, "Product", 1)
-    pdf.cell(15, 7, "Pack", 1)
-    pdf.cell(15, 7, "Qty", 1)
-    pdf.cell(15, 7, "Deal", 1)
-    pdf.cell(20, 7, "MRP (Rs)", 1)
-    pdf.cell(20, 7, "Disc(%)", 1)
-    pdf.cell(20, 7, "Disc(Rs)", 1)
-    pdf.cell(20, 7, "Rate (Rs)", 1)
-    pdf.cell(20, 7, "Amount", 1)
-    pdf.ln()
-    
-    pdf.set_font("Helvetica", '', 8)
-    for row in cart_data:
-        pdf.cell(45, 6, str(row['PRODUCT'])[:22], 1)
-        pdf.cell(15, 6, str(row.get('PACK', ''))[:8], 1)
-        pdf.cell(15, 6, str(row['QTY']), 1)
-        pdf.cell(15, 6, str(row.get('DEAL/FREE', '')), 1)
-        pdf.cell(20, 6, f"{float(row['MRP']):.2f}", 1)
-        pdf.cell(20, 6, f"{float(row.get('DISC (%)', 0)):.1f}%", 1)
-        pdf.cell(20, 6, f"{float(row.get('DISC (₹)', 0)):.2f}", 1)
-        pdf.cell(20, 6, f"{float(row['RATE']):.2f}", 1)
-        pdf.cell(20, 6, f"{float(row['AMOUNT']):.2f}", 1)
-        pdf.ln()
-        
-    pdf.ln(4)
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.cell(190, 6, f"Sub Total: Rs. {sub_total:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    pdf.cell(190, 6, f"Extra Bill Discount: Rs. {bill_disc:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    pdf.cell(190, 6, f"GST Tax: Rs. {gst_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    pdf.cell(190, 6, f"Grand Total: Rs. {net_val:,.2f}", new_x="LMARGIN", new_y="NEXT", align='R')
-    
-    return bytes(pdf.output())
-
-if "logged_in" not in st.session_state: st.session_state["logged_in"] = False
-if "scanned_cart" not in st.session_state: st.session_state["scanned_cart"] = []
-
-USERS_DB = load_all_users()
-MASTER_DF = load_master_products()
-MASTER_LIST = MASTER_DF["product_name"].tolist() if not MASTER_DF.empty else []
-
-if not st.session_state["logged_in"]:
-    st.markdown("<h2 class='main-header'>🍊 SGB / LCB Pharma Wholesale ERP</h2>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 2, 1])
-    with c2:
-        username_input = st.text_input("Username").strip().lower()
-        password_input = st.text_input("Password", type="password")
-        if st.button("🚀 Secure Login"):
-            if username_input in USERS_DB and USERS_DB[username_input]["password"] == password_input:
-                st.session_state["logged_in"] = True
-                st.session_state["logged_user"] = USERS_DB[username_input]
-                st.session_state["username"] = username_input
-                st.rerun()
-            else: st.error("❌ Invalid Username or Password")
-    st.stop()
-
-logged_user = st.session_state["logged_user"]
-st.sidebar.title(f"🍊 {logged_user['name']}")
-st.sidebar.caption(f"Role: {logged_user['role']}")
-
-nav_options = [
-    "🤖 AI Smart Scan & Billing",
-    "📦 Sales History",
-    "📥 Purchase History (Stock In)",
-    "🏭 Batch Stock & Expiry Alert"
-]
-
-if logged_user["role"] == "Manager":
-    nav_options.append("👥 User Management (Admin)")
-    nav_options.append("🏷️ Manage Master Products")
-
-active_tab = st.sidebar.radio("Navigation", nav_options)
-
-if st.sidebar.button("🚪 Logout"):
-    st.session_state["logged_in"] = False
-    st.session_state["scanned_cart"] = []
-    st.rerun()
-
-if active_tab == "🤖 AI Smart Scan & Billing":
-    st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
-    
-    c1, c2 = st.columns(2)
-    with c1: uploaded_img = st.file_uploader("📷 Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"])
-    with c2: raw_text = st.text_area("✍️ Or Paste Text Invoice Data")
-        
-    if st.button("✨ Auto-Extract via Gemini AI"):
-        if uploaded_img or raw_text:
-            with st.spinner("Scanning Document & Auto-Detecting Products..."):
-                items = process_bill_with_gemini(uploaded_img, raw_text, MASTER_DF)
-                if items:
-                    st.session_state["scanned_cart"].extend(items)
-                    st.success(f"✅ Successfully Extracted {len(items)} Items!")
-                    st.rerun()
-                else:
-                    st.error("❌ Could not extract items. Please make sure image is readable or try pasting bill text.")
-        else: st.warning("Please upload a slip image or paste text.")
-
-    st.markdown("---")
-    
-    st.subheader("📝 Wholesale Bill Meta Info")
-    f1, f2, f3 = st.columns(3)
-    with f1: party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
-    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
-    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
-
-    st.markdown("##### ➕ Manual Item Addi
+        json_match = re.search(r'
