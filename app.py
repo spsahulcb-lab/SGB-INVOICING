@@ -578,3 +578,4 @@ st.markdown("
         if st.button("🗑️ Clear Entire List"):
             st.session_state["scanned_cart"] = []
             st.rerun()
+        
