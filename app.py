@@ -533,15 +533,15 @@ rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross R
 if rate_mode == "NET RATE Mode (0% GST)":
         with st.form("net_billing_form", clear_on_submit=False):
            
-        r1_c1, r1_c2, r1_c3 = st.columns(3)
-        s_qty = r1_c1.number_input("Qty", min_value=1, value=1)
-        m_pack = r1_c2.text_input("Pack", value=def_pack)
-        s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
-
-        r2_c1, r2_c2 = st.columns(2)
-        m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-        m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-        
+            r1_c1, r1_c2, r1_c3 = st.columns(3)
+            s_qty = r1_c1.number_input("Qty", min_value=1, value=1)
+            m_pack = r1_c2.text_input("Pack", value=def_pack)
+            s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+    
+            r2_c1, r2_c2 = st.columns(2)
+            m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
+            m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
+            
         s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
         
         submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
