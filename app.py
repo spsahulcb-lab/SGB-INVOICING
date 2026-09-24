@@ -545,9 +545,7 @@ with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_b
         s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
         
         submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-        st.markdown("
-", unsafe_allow_html=True)
-
+        
         if submitted_net and sel_prod != "00":
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             amt = float(s_qty) * calc_net_rate
@@ -560,8 +558,7 @@ with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_b
             st.rerun()
 else:
     with st.form("gross_billing_form", clear_on_submit=False):
-        st.markdown("
-", unsafe_allow_html=True)
+        
 r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
 with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
 with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
@@ -639,10 +636,6 @@ if st.session_state["scanned_cart"]:
 🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
 💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
 """, unsafe_allow_html=True)
-st.markdown("
-
-
-", unsafe_allow_html=True)
 
     save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
     
