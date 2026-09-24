@@ -14,26 +14,25 @@ from supabase import create_client, Client
 # ==========================================
 # PAGE CONFIG & STYLING (ORANGE THEME)
 # ==========================================
-st.set_page_config(page_title="SGB / LCB Pharma Wholesale ERP", layout="wide", initial_sidebar_state="expanded")
-# --- APP HEADER WITH DUTY BEAUTY LOGO & LCB WHOLESALE ERP ---
+
+import streamlit as st
+
+# --- APP HEADER WITH SMALL TOP WATERMARK SPIRAL & LCB WHOLESALE ERP ---
 st.markdown("""
-    <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 25px;">
-        <!-- Duty Beauty Spiral Logo Icon -->
-        <div style="width: 55px; height: 55px; border-radius: 50%; background: radial-gradient(circle, #D4AF37 0%, #3A2312 100%); display: flex; align-items: center; justify-content: center; box-shadow: 0px 4px 10px rgba(212, 175, 55, 0.3);">
-            <span style="font-size: 28px; color: #FFF8E7; font-weight: bold; line-height: 1;">🌀</span>
+    <div style="text-align: center; margin-bottom: 20px;">
+        <!-- Small Spiral Watermark Icon at the Very Top -->
+        <div style="display: inline-block; width: 42px; height: 42px; border-radius: 50%; background: radial-gradient(circle, #FFE29F 0%, #FFA99F 48%, #FF719A 100%); padding: 2px; box-shadow: 0px 2px 8px rgba(255, 113, 154, 0.25);">
+            <div style="width: 100%; height: 100%; border-radius: 50%; background: #FFF8F0; display: flex; align-items: center; justify-content: center;">
+                <span style="font-size: 20px; opacity: 0.85; line-height: 1;">🌀</span>
+            </div>
         </div>
-        <!-- Title Text -->
-        <div>
-            <h1 style="margin: 0; padding: 0; font-family: 'Playfair Display', 'Georgia', serif; color: #2C1A0E; font-size: 30px; font-weight: 700; letter-spacing: 0.5px;">
-                Duty Beauty
-            </h1>
-            <p style="margin: 0; padding: 0; font-family: 'sans-serif'; color: #8C6D53; font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px;">
-                LCB Wholesale ERP
-            </p>
-        </div>
+        
+        <!-- Clean Title (Duty Beauty brand text removed) -->
+        <h1 style="margin: 8px 0 0 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; color: #2C1A0E; font-size: 28px; font-weight: 800; letter-spacing: 0.5px;">
+            LCB Wholesale ERP
+        </h1>
     </div>
 """, unsafe_allow_html=True)
-
 
 # ==========================================
 # HYBRID DATABASE SETUP (SUPABASE + LOCAL SQLITE)
