@@ -545,8 +545,7 @@ if rate_mode == "NET RATE Mode (0% GST)":
         s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
         
         submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-        st.markdown("
-", unsafe_allow_html=True)
+       
 
         if submitted_net and sel_prod != "00":
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
