@@ -573,8 +573,7 @@ with r1_c4: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, st
         s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
         
         submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
-        st.markdown("
-", unsafe_allow_html=True)
+        
 
         if submitted_gross and sel_prod != "00":
             if s_disc_pct > 0:
