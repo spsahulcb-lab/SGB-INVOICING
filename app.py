@@ -605,10 +605,6 @@ if st.session_state["scanned_cart"]:
 🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
 💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
 """, unsafe_allow_html=True)
-st.markdown("
-
-
-", unsafe_allow_html=True)
 
     save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
     
