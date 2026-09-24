@@ -531,33 +531,34 @@ if prod_batches:
 rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
 
 if rate_mode == "NET RATE Mode (0% GST)":
-        with st.form("net_billing_form", clear_on_submit=False):
-           
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            s_qty = r1_c1.number_input("Qty", min_value=1, value=1)
-            m_pack = r1_c2.text_input("Pack", value=def_pack)
-            s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+        st.markdown("
+", unsafe_allow_html=True)
+
+    r1_c1, r1_c2, r1_c3 = st.columns(3)
+    s_qty = r1_c1.number_input("Qty", min_value=1, value=1, key="net_qty")
+    m_pack = r1_c2.text_input("Pack", value=def_pack, key="net_pack")
+    s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp, key="net_mrp")
+
+    r2_c1, r2_c2 = st.columns(2)
+    m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00", key="net_batch")
+    m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00", key="net_exp")
     
-            r2_c1, r2_c2 = st.columns(2)
-            m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-            m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-            
-        s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-        
-        submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-       
+    s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
+    
+    submitted_net = st.button("➕ Add Net Item to Bill", key="btn_add_net")
+    st.markdown("
+", unsafe_allow_html=True)
 
-        if submitted_net and sel_prod != "00":
-            calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            amt = float(s_qty) * calc_net_rate
-            st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
-
+    if submitted_net and sel_prod != "00":
+        calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+        amt = float(s_qty) * calc_net_rate
+        st.session_state["scanned_cart"].append({
+            "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+            "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
+            "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+            "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
+        })
+        st.rerun()
 # ==========================================
 # 2. SALES HISTORY
 # ==========================================
