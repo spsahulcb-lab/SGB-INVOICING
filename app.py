@@ -532,8 +532,7 @@ rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross R
 
 if rate_mode == "NET RATE Mode (0% GST)":
     with st.form("net_billing_form", clear_on_submit=False):
-        st.markdown("
-", unsafe_allow_html=True)
+   
 r1_c1, r1_c2, r1_c3 = st.columns(3)
 with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
 with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
