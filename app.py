@@ -780,56 +780,18 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
         st.markdown("---")
         st.subheader("🛒 Current Bill Items (Fully Editable Table)")
         st.info("💡 Ab aap table ke andar **Product Name**, **MRP**, **Batch**, **Expiry**, **Qty**, aur **Rate** ko direct click karke change/edit kar sakte hain!")
-        
-        cart_df = pd.DataFrame(st.session_state["scanned_cart"])
-        
-        edited_df = st.data_editor(
-            cart_df, 
-            key="cart_editor", 
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "PRODUCT": st.column_config.TextColumn("PRODUCT", help="Click to edit product name"),
-                "MRP": st.column_config.NumberColumn("MRP", format="₹ %.2f"),
-                "RATE": st.column_config.NumberColumn("RATE", format="₹ %.2f"),
-                "AMOUNT": st.column_config.NumberColumn("AMOUNT", format="₹ %.2f"),
-            }
-        )
-        
-        for idx, row in edited_df.iterrows():
-            q = clean_float(row.get('QTY', 0))
-            rt = clean_float(row.get('RATE', 0))
-            edited_df.loc[idx, 'AMOUNT'] = round(q * rt, 2)
-
-        st.session_state["scanned_cart"] = edited_df.to_dict('records')
-        
-        o_col1, o_col2 = st.columns([2, 1])
-        with o_col2:
-            extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
-        
-        if not edited_df.empty:
-            sub_total = float(edited_df["AMOUNT"].sum())
-            total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
-            gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
-            net_val = (sub_total - extra_bill_disc) + gst_val
-        else:
-            sub_total = total_mrp_sum = gst_val = net_val = 0.0
     if rate_mode == "NET RATE Mode (0% GST)":
         with st.form("net_billing_form", clear_on_submit=False):
             st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
+            
             r1_c1, r1_c2, r1_c3 = st.columns(3)
-            with r1_c1:
-                s_qty = st.number_input("Qty", min_value=1, value=1)
-            with r1_c2:
-                m_pack = st.text_input("Pack", value=def_pack)
-            with r1_c3:
-                s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+            s_qty = r1_c1.number_input("Qty", min_value=1, value=1)
+            m_pack = r1_c2.text_input("Pack", value=def_pack)
+            s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
 
             r2_c1, r2_c2 = st.columns(2)
-            with r2_c1:
-                m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-            with r2_c2:
-                m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
+            m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
+            m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
             
             s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
             
@@ -846,6 +808,7 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
                     "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
+
 
 
 # ==========================================
