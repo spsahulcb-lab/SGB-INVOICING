@@ -530,8 +530,7 @@ if prod_batches:
     selected_batch_info = next((x for x in prod_batches if x["label"] == selected_batch_label), None)
 
 with st.form("manual_add_form", clear_on_submit=False):
-    st.markdown("
-", unsafe_allow_html=True)
+    st.markdown("### Compact Manual Item Addition", unsafe_allow_html=True)
 
     f_c1, f_c2, f_c3, f_c4 = st.columns(4)
     with f_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
