@@ -17,22 +17,23 @@ from supabase import create_client, Client
 
 import streamlit as st
 
-# --- APP HEADER WITH SMALL TOP WATERMARK SPIRAL & LCB WHOLESALE ERP ---
+# --- APP HEADER: ORANGE THEME + SMALL SPIRAL LOGO + LCB PHARMA WHOLESALE ERP ---
 st.markdown("""
-    <div style="text-align: center; margin-bottom: 20px;">
-        <!-- Small Spiral Watermark Icon at the Very Top -->
-        <div style="display: inline-block; width: 42px; height: 42px; border-radius: 50%; background: radial-gradient(circle, #FFE29F 0%, #FFA99F 48%, #FF719A 100%); padding: 2px; box-shadow: 0px 2px 8px rgba(255, 113, 154, 0.25);">
-            <div style="width: 100%; height: 100%; border-radius: 50%; background: #FFF8F0; display: flex; align-items: center; justify-content: center;">
-                <span style="font-size: 20px; opacity: 0.85; line-height: 1;">🌀</span>
-            </div>
+    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+        <!-- Small Spiral Logo Icon at Left Top -->
+        <div style="width: 45px; height: 45px; border-radius: 50%; background: radial-gradient(circle, #FFA726 0%, #FB8C00 100%); display: flex; align-items: center; justify-content: center; box-shadow: 0px 3px 8px rgba(251, 140, 0, 0.3);">
+            <span style="font-size: 24px; color: #FFFFFF; font-weight: bold; line-height: 1;">🌀</span>
         </div>
-        
-        <!-- Clean Title (Duty Beauty brand text removed) -->
-        <h1 style="margin: 8px 0 0 0; padding: 0; font-family: 'Helvetica Neue', Arial, sans-serif; color: #2C1A0E; font-size: 28px; font-weight: 800; letter-spacing: 0.5px;">
-            LCB Wholesale ERP
-        </h1>
+        <!-- Title Text -->
+        <div>
+            <h1 style="margin: 0; padding: 0; font-family: 'Source Sans Pro', sans-serif; color: #31333F; font-size: 28px; font-weight: 700; line-height: 1.2;">
+                LCB Pharma Wholesale ERP
+            </h1>
+        </div>
     </div>
 """, unsafe_allow_html=True)
+
+
 
 # ==========================================
 # HYBRID DATABASE SETUP (SUPABASE + LOCAL SQLITE)
