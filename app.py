@@ -814,48 +814,39 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
             net_val = (sub_total - extra_bill_disc) + gst_val
         else:
             sub_total = total_mrp_sum = gst_val = net_val = 0.0
-        
-        st.markdown(f"""
-            <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
-                <h4 style='color:#E65100; margin:0;'>🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}</h4>
-                <h3 style='color:#D84315; margin-top:5px;'>💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}</h3>
-            </div>
-        """, unsafe_allow_html=True)
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
-        
-        with save_col1:
-            if st.button("📤 Save SALES"):
-                save_transaction_data("sales", st.session_state["scanned_cart"], inv_no, party_name, st.session_state["username"])
-                st.success("✅ Saved to Sales Database!")
-                st.session_state["scanned_cart"] = []
+    if rate_mode == "NET RATE Mode (0% GST)":
+        with st.form("net_billing_form", clear_on_submit=False):
+            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
+            r1_c1, r1_c2, r1_c3 = st.columns(3)
+            with r1_c1:
+                s_qty = st.number_input("Qty", min_value=1, value=1)
+            with r1_c2:
+                m_pack = st.text_input("Pack", value=def_pack)
+            with r1_c3:
+                s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+
+            r2_c1, r2_c2 = st.columns(2)
+            with r2_c1:
+                m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
+            with r2_c2:
+                m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
+            
+            s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
+            
+            submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            if submitted_net and sel_prod != "00":
+                calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+                amt = float(s_qty) * calc_net_rate
+                st.session_state["scanned_cart"].append({
+                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+                    "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
+                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                    "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
+                })
                 st.rerun()
 
-        with save_col2:
-            if st.button("📥 Save PURCHASE"):
-                save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name, st.session_state["username"])
-                st.success("✅ Saved to Purchase Database!")
-                st.session_state["scanned_cart"] = []
-                st.rerun()
-
-        with save_col3:
-            try:
-                pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, extra_bill_disc, sub_total, gst_val, net_val)
-                st.download_button(label="📄 Download PDF", data=pdf_bytes, file_name=f"{inv_no}.pdf", mime="application/pdf")
-            except Exception as pdf_err: st.error(f"PDF Error: {pdf_err}")
-
-        with save_col4:
-            msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
-            for row in st.session_state["scanned_cart"]:
-                msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','00')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
-            wa_url = f"https://api.whatsapp.com/send?text={urllib.parse.quote(msg)}"
-            st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
-
-        with save_col5:
-            if st.button("🗑️ Clear Entire List"):
-                st.session_state["scanned_cart"] = []
-                st.rerun()
 
 # ==========================================
 # 2. SALES HISTORY
