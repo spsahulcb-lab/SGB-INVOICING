@@ -563,8 +563,8 @@ if rate_mode == "NET RATE Mode (0% GST)":
             })
             st.rerun()
 
-    else:
-        with st.form("gross_billing_form", clear_on_submit=False):
+else:
+    with st.form("gross_billing_form", clear_on_submit=False):
             r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
             with r1_c1:
                 s_qty = st.number_input("Qty", min_value=1, value=1)
