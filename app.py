@@ -530,7 +530,7 @@ if prod_batches:
 # Billing Mode Options Restored!
 rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
 
-inj rate_mode == "NET RATE Mode (0% GST)":
+if rate_mode == "NET RATE Mode (0% GST)":
     with st.form("net_billing_form", clear_on_submit=False):
        r1_c1, r1_c2, r1_c3 = st.columns(3)
         with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
