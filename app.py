@@ -551,8 +551,7 @@ with st.form("manual_add_form", clear_on_submit=False):
         s_gst = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
 
     submitted_item = st.form_submit_button("➕ Add Item to Bill")
-    st.markdown("
-", unsafe_allow_html=True)
+  
 
     if submitted_item and sel_prod != "00":
         calc_rate = s_rate if s_rate > 0 else round(s_mrp * (1 - (s_disc / 100.0)), 2)
