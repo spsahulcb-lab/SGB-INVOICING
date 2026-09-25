@@ -531,286 +531,32 @@ if prod_batches:
 rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
 
 if rate_mode == "NET RATE Mode (0% GST)":
-    with st.form("net_billing_form", clear_on_submit=False):
-   
-r1_c1, r1_c2, r1_c3 = st.columns(3)
-with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
-with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
-with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+       
 
-        r2_c1, r2_c2 = st.columns(2)
-        with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-        with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-        
-        s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-        
-        submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-        
-        if submitted_net and sel_prod != "00":
-            calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            amt = float(s_qty) * calc_net_rate
-            st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
-else:
-    with st.form("gross_billing_form", clear_on_submit=False):
-        
-r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
-with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
-with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
-with r1_c4: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+    r1_c1, r1_c2, r1_c3 = st.columns(3)
+    s_qty = r1_c1.number_input("Qty", min_value=1, value=1, key="net_qty")
+    m_pack = r1_c2.text_input("Pack", value=def_pack, key="net_pack")
+    s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp, key="net_mrp")
 
-        r2_c1, r2_c2, r2_c3 = st.columns(3)
-        with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-        with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-        with r2_c3: s_deal = st.text_input("Deal", value="00")
-        
-        s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-        
-        submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
-        
-
-        if submitted_gross and sel_prod != "00":
-            if s_disc_pct > 0:
-                calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            else:
-                base_rate = selected_batch_info["rate"] if selected_batch_info and selected_batch_info["rate"] > 0 else def_rate
-                calc_rate = base_rate if base_rate > 0 else round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-            
-            amt = float(s_qty) * calc_rate
-            st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
-
-if st.session_state["scanned_cart"]:
-    st.markdown("---")
-    st.subheader("🛒 Current Bill Items (Fully Editable Table)")
-    st.info("💡 Ab aap table ke andar **Product Name**, **MRP**, **Batch**, **Expiry**, **Qty**, aur **Rate** ko direct click karke change/edit kar sakte hain!")
+    r2_c1, r2_c2 = st.columns(2)
+    m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00", key="net_batch")
+    m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00", key="net_exp")
     
-    cart_df = pd.DataFrame(st.session_state["scanned_cart"])
+    s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
     
-    edited_df = st.data_editor(
-        cart_df, 
-        key="cart_editor", 
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "PRODUCT": st.column_config.TextColumn("PRODUCT", help="Click to edit product name"),
-            "MRP": st.column_config.NumberColumn("MRP", format="₹ %.2f"),
-            "RATE": st.column_config.NumberColumn("RATE", format="₹ %.2f"),
-            "AMOUNT": st.column_config.NumberColumn("AMOUNT", format="₹ %.2f"),
-        }
-    )
-    
-    # Auto-recalculate amount if Qty or Rate changes in editor
-    for idx, row in edited_df.iterrows():
-        q = clean_float(row.get('QTY', 0))
-        rt = clean_float(row.get('RATE', 0))
-        edited_df.loc[idx, 'AMOUNT'] = round(q * rt, 2)
+    submitted_net = st.button("➕ Add Net Item to Bill", key="btn_add_net")
+  
 
-    st.session_state["scanned_cart"] = edited_df.to_dict('records')
-    
-    o_col1, o_col2 = st.columns([2, 1])
-    with o_col2:
-        extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
-    
-    if not edited_df.empty:
-        sub_total = float(edited_df["AMOUNT"].sum())
-        total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
-        gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
-        net_val = (sub_total - extra_bill_disc) + gst_val
-    else:
-        sub_total = total_mrp_sum = gst_val = net_val = 0.0
-    
-    st.markdown(f"""
-🏷️ Total MRP: ₹ {total_mrp_sum:,.2f} | 🎁 Overall Extra Disc: ₹ {extra_bill_disc:,.2f}
-💰 Sub Total: ₹ {sub_total:,.2f} | GST Tax: ₹ {gst_val:,.2f} | Grand Total: ₹ {net_val:,.2f}
-""", unsafe_allow_html=True)
-
-    save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
-    
-elif active_tab == "🤖 AI Smart Scan & Billing":
-    st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
-    
-    c1, c2 = st.columns(2)
-    with c1: uploaded_img = st.file_uploader("📷 Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"])
-    with c2: raw_text = st.text_area("✍️ Or Paste Text Invoice Data")
-        
-    if st.button("✨ Auto-Extract via Gemini AI"):
-        if uploaded_img or raw_text:
-            with st.spinner("Scanning Document & Auto-Detecting Products..."):
-                items = process_bill_with_gemini(uploaded_img, raw_text, MASTER_DF)
-                if items:
-                    st.session_state["scanned_cart"].extend(items)
-                    st.success(f"✅ Successfully Extracted {len(items)} Items!")
-                    st.rerun()
-                else:
-                    st.error("❌ Could not extract items.")
-        else: st.warning("Please upload a slip image or paste text.")
-
-    st.markdown("---")
-    
-    st.subheader("📝 Wholesale Bill Meta Info (Fully Editable)")
-    f1, f2, f3 = st.columns(3)
-    
-    existing_parties = get_existing_parties()
-    with f1:
-        party_mode = st.radio("Party Input Mode:", ["Select Saved Party", "Type New Party"], horizontal=True)
-        if party_mode == "Select Saved Party" and existing_parties:
-            sel_saved_party = st.selectbox("Select Party / Medical Store", existing_parties)
-            party_name = st.text_input("Or Edit Party Name", value=sel_saved_party)
-        else:
-            party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
-            
-    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
-    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
-
-    st.markdown("##### ➕ Manual Item Addition (Multiple Batch & MRP Support)")
-    
-    sel_prod = st.selectbox("Select Product", MASTER_LIST, index=0)
-    
-    df_pur_hist = load_transaction_data("purchase")
-    prod_batches = []
-    if sel_prod != "00" and not df_pur_hist.empty and 'product' in df_pur_hist.columns:
-        p_history = df_pur_hist[df_pur_hist['product'] == sel_prod]
-        for _, row in p_history.iterrows():
-            b = str(row.get('batch', '00'))
-            e = str(row.get('expiry', '00'))
-            m = clean_float(row.get('mrp', 0))
-            r = clean_float(row.get('rate', 0))
-            combo_label = f"Batch: {b} | Exp: {e} | MRP: ₹{m} | Rate: ₹{r}"
-            if combo_label not in [x['label'] for x in prod_batches]:
-                prod_batches.append({
-                    "label": combo_label,
-                    "batch": b,
-                    "expiry": e,
-                    "mrp": m,
-                    "rate": r
-                })
-
-    def_pack = "10x10"
-    def_mrp = 0.0
-    def_rate = 0.0
-    if sel_prod != "00" and not MASTER_DF.empty:
-        m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
-        if not m_match.empty:
-            def_pack = str(m_match["pack"].values[0])
-            def_mrp = float(m_match["mrp"].values[0])
-            def_rate = float(m_match["rate"].values[0])
-
-    selected_batch_info = None
-    if prod_batches:
-        selected_batch_label = st.selectbox("🔄 Select Batch & MRP Option (Recent Default)", [x["label"] for x in prod_batches])
-        selected_batch_info = next((x for x in prod_batches if x["label"] == selected_batch_label), None)
-
-    rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
-
-    if rate_mode == "NET RATE Mode (0% GST)":
-        with st.form("net_billing_form", clear_on_submit=False):
-            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
-            with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
-            with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
-
-            r2_c1, r2_c2 = st.columns(2)
-            with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-            with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-            
-            s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-            
-            submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            if submitted_net and sel_prod != "00":
-                calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-                amt = float(s_qty) * calc_net_rate
-                st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                    "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                    "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-                })
-                st.rerun()
-    else:
-        with st.form("gross_billing_form", clear_on_submit=False):
-            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
-            r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
-            with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
-            with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
-            with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
-            with r1_c4: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
-
-            r2_c1, r2_c2, r2_c3 = st.columns(3)
-            with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-            with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-            with r2_c3: s_deal = st.text_input("Deal", value="00")
-            
-            s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-            
-            submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            if submitted_gross and sel_prod != "00":
-                if s_disc_pct > 0:
-                    calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-                else:
-                    base_rate = selected_batch_info["rate"] if selected_batch_info and selected_batch_info["rate"] > 0 else def_rate
-                    calc_rate = base_rate if base_rate > 0 else round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-                
-                amt = float(s_qty) * calc_rate
-                st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                    "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
-                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                    "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
-                })
-                st.rerun()
-
-    if st.session_state["scanned_cart"]:
-        st.markdown("---")
-        st.subheader("🛒 Current Bill Items (Fully Editable Table)")
-        st.info("💡 Ab aap table ke andar **Product Name**, **MRP**, **Batch**, **Expiry**, **Qty**, aur **Rate** ko direct click karke change/edit kar sakte hain!")
-    if rate_mode == "NET RATE Mode (0% GST)":
-        with st.form("net_billing_form", clear_on_submit=False):
-            st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
-            
-            r1_c1, r1_c2, r1_c3 = st.columns(3)
-            s_qty = r1_c1.number_input("Qty", min_value=1, value=1)
-            m_pack = r1_c2.text_input("Pack", value=def_pack)
-            s_mrp = r1_c3.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
-
-            r2_c1, r2_c2 = st.columns(2)
-            m_batch = r2_c1.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-            m_exp = r2_c2.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-            
-            s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-            
-            submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            if submitted_net and sel_prod != "00":
-                calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-                amt = float(s_qty) * calc_net_rate
-                st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                    "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                    "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-                })
-                st.rerun()
-
-
-
+    if submitted_net and sel_prod != "00":
+        calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+        amt = float(s_qty) * calc_net_rate
+        st.session_state["scanned_cart"].append({
+            "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+            "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
+            "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+            "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
+        })
+        st.rerun()
 # ==========================================
 # 2. SALES HISTORY
 # ==========================================
