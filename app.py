@@ -582,28 +582,26 @@ else:
                 m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
             with r2_c3:
                 s_deal = st.text_input("Deal", value="00")
-            
-        
-        s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-        
-        submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
-        
 
-        if submitted_gross and sel_prod != "00":
-            if s_disc_pct > 0:
-                calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            else:
-                base_rate = selected_batch_info["rate"] if selected_batch_info and selected_batch_info["rate"] > 0 else def_rate
-                calc_rate = base_rate if base_rate > 0 else round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-            
-            amt = float(s_qty) * calc_rate
-            st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
+            s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
+
+            submitted_gross = st.form_submit_button("➕ Add Gross Item to ERP")
+
+    if submitted_gross and sel_prod != "00":
+        if s_disc_pct > 0:
+            calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+        else:
+            base_rate = selected_batch_info["rate"] if selected_batch_info else s_mrp
+            calc_rate = base_rate
+
+        amt = float(s_qty) * calc_rate
+        st.session_state["scanned_cart"].append({
+            "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+            "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
+            "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+            "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
+        })
+        st.rerun()
 
 if st.session_state["scanned_cart"]:
     st.markdown("---")
