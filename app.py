@@ -654,18 +654,11 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
-with c1:
-    uploaded_img = st.file_uploader(
-        "📸 Upload Invoice / Order Slip", 
-        type=["jpg", "png", "jpeg"], 
-        key="unique_invoice_uploader_v1"
-    )
+with c1: uploaded_img = st.file_uploader("📸 Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"], key="scanner_img_uploader")
+with c2: raw_text = st.text_area("✍️ Or Paste Text Invoice Data", key="scanner_text_area")
 
-with c2:
-    raw_text = st.text_area(
-        "✍️ Or Paste Text Invoice Data", 
-        key="unique_text_area_v1"
-    )
+if st.button("🪄 Auto-Extract via Gemini AI", key="scanner_btn_extract"):
+
     
     if st.button("✨ Auto-Extract via Gemini AI"):
         if uploaded_img or raw_text:
