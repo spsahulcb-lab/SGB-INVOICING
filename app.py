@@ -654,12 +654,13 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
     st.markdown("<h2 style='color: #E65100;'>🤖 AI Scanner & Wholesale Billing</h2>", unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
-    # Line 657 ke paas is tarah modification karein:
-with c1:
-    uploaded_img = st.file_uploader(
+    
+    with c1:
+     uploaded_img = st.file_uploader(
         "📸 Upload Invoice / Order Slip", 
         type=["jpg", "png", "jpeg"], 
-        key="unique_invoice_uploader_key"  # <-- Yahan unique key add karein)
+        key="unique_invoice_uploader_key"
+     )
     
     with c2: raw_text = st.text_area("✍️ Or Paste Text Invoice Data")
         
