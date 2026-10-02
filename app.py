@@ -167,6 +167,14 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
             "created_at": today,
             "sr_username": sr_username
         })
+
+def save_bill_to_db(party, invoice, gstin, edited_df, table_name="sales"):
+    if edited_df.empty:
+        st.warning("⚠️ No items in the bill to save!")
+        return
+    items = edited_df.to_dict('records')
+    sr_user = st.session_state.get("username", "manager")
+    save_transaction_data(table_name, items, invoice, party, sr_user)
     
     if supabase:
         try: supabase.table(table_name).insert(records).execute()
