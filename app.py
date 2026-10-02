@@ -145,35 +145,44 @@ def auto_correct_brand(scanned_name, master_list):
     matches = difflib.get_close_matches(scanned_name, master_list, n=1, cutoff=0.65)
     return matches[0] if matches else scanned_name.strip()
 
-def save_transaction_data(table_name, items, invoice, party, sr_username):
-    today = datetime.now().strftime("%Y-%m-%d %H:%M")
-    records = []
-    for row in items:
-        records.append({
-            "invoice": invoice,
-            "party": party,
-            "product": row.get('PRODUCT', ''),
-            "pack": row.get('PACK', '00'),
-            "batch": str(row.get('BATCH', '00')),
-            "expiry": str(row.get('EXPIRY', '00')),
-            "qty": float(row.get('QTY', 0)),
-            "free_qty": str(row.get('DEAL/FREE', '00')),
-            "mrp": float(row.get('MRP', 0)),
-            "disc_pct": float(row.get('DISC (%)', 0)),
-            "disc_rs": float(row.get('DISC (₹)', 0)),
-            "rate": float(row.get('RATE', 0)),
-            "gst": float(row.get('GST', 5.0)),
-            "amount": float(row.get('AMOUNT', 0)),
-            "created_at": today,
-            "sr_username": sr_username
-        })
+def save_transaction_data(table_name, items, invoice, party, sr_user):
+    try:
+        data_to_insert = []
+        for item in items:
+            row = {
+                "invoice": str(invoice),
+                "party": str(party),
+                "product": str(item.get("PRODUCT", "")),
+                "pack": str(item.get("PACK", "")),
+                "batch": str(item.get("BATCH", "")),
+                "expiry": str(item.get("EXPIRY", "")),
+                "qty": float(item.get("QTY", 0)),
+                "free_qty": str(item.get("DEAL/FREE", "00")),
+                "mrp": float(item.get("MRP", 0)),
+                "rate": float(item.get("RATE", 0)),
+                "gst": float(item.get("GST", 0)),
+                "amount": float(item.get("AMOUNT", 0)),
+                "sr_username": str(sr_user),
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            data_to_insert.append(row)
+            
+        if data_to_insert:
+            supabase.table(table_name).insert(data_to_insert).execute()
+            st.success("✅ Data saved successfully to Supabase!")
+    except Exception as e:
+        st.error(f"❌ Database Error: {e}")
 
 def save_bill_to_db(party, invoice, gstin, edited_df, table_name="sales"):
     if edited_df.empty:
         st.warning("⚠️ No items in the bill to save!")
         return
+    
+    # Clean dictionary records
     items = edited_df.to_dict('records')
     sr_user = st.session_state.get("username", "manager")
+    
+    # Save directly via existing transaction helper
     save_transaction_data(table_name, items, invoice, party, sr_user)
     
     if supabase:
