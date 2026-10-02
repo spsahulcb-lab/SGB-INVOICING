@@ -169,7 +169,7 @@ def save_transaction_data(table_name, items, invoice, party, sr_user):
             
         if data_to_insert:
             supabase.table(table_name).insert(data_to_insert).execute()
-            st.success("✅ Data saved successfully to Supabase!")
+            st.success("✅ Sales Record Saved Successfully!")
     except Exception as e:
         st.error(f"❌ Database Error: {e}")
 
@@ -177,12 +177,8 @@ def save_bill_to_db(party, invoice, gstin, edited_df, table_name="sales"):
     if edited_df.empty:
         st.warning("⚠️ No items in the bill to save!")
         return
-    
-    # Clean dictionary records
     items = edited_df.to_dict('records')
     sr_user = st.session_state.get("username", "manager")
-    
-    # Save directly via existing transaction helper
     save_transaction_data(table_name, items, invoice, party, sr_user)
     
     if supabase:
