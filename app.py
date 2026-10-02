@@ -254,6 +254,17 @@ def get_existing_parties():
     p2 = pur_df['party'].dropna().unique().tolist() if not pur_df.empty else []
     return sorted(list(set(p1 + p2)))
 
+def get_latest_batch_expiry(product_name):
+    df_pur = load_transaction_data("purchase")
+    if not df_pur.empty and 'product' in df_pur.columns:
+        prod_pur = df_pur[df_pur['product'] == product_name]
+        if not prod_pur.empty:
+            latest_row = prod_pur.iloc[0]
+            batch = str(latest_row.get('batch', '00'))
+            expiry = str(latest_row.get('expiry', '00'))
+            return batch if batch and batch != 'nan' else '00', expiry if expiry and expiry != 'nan' else '00'
+    return '00', '00'
+
 # ==========================================
 # GEMINI AI SETUP
 # ==========================================
@@ -478,20 +489,30 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
 
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
-        p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
-        with p1: 
+        with st.form("net_billing_form"):
             sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST, index=0)
             
-        with p2: m_pack = st.text_input("Pack", value="00", key="net_pack")
-        with p3: m_batch = st.text_input("Batch", value="00", key="net_batch")
-        with p4: m_exp = st.text_input("Expiry", value="00", key="net_exp")
-        with p5: s_qty = st.number_input("Qty", min_value=0, value=0, key="net_qty")
-        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0, key="net_mrp")
-        with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
-        with p8:
-            calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            st.write(f"**Net Rate:** ₹{calc_net_rate}")
-            if st.button("➕ Add Net Item"):
+            def_pack = "00"
+            def_mrp = 0.0
+            if sel_prod != "00" and not MASTER_DF.empty:
+                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
+                if not m_match.empty:
+                    def_pack = str(m_match["pack"].values[0])
+                    def_mrp = float(m_match["mrp"].values[0])
+            
+            def_batch, def_exp = get_latest_batch_expiry(sel_prod)
+
+            p1, p2, p3, p4, p5, p6 = st.columns(6)
+            with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
+            with p2: m_pack = st.text_input("Pack", value=def_pack)
+            with p3: m_batch = st.text_input("Batch", value=def_batch)
+            with p4: m_exp = st.text_input("Expiry", value=def_exp)
+            with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
+            with p6: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
+            
+            submitted_net = st.form_submit_button("➕ Add Net Item")
+            if submitted_net:
+                calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
                 amt = float(s_qty) * calc_net_rate
                 st.session_state["scanned_cart"].append({
                     "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
@@ -501,25 +522,35 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 })
                 st.rerun()
     else:
-        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.8, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
-        with p1: 
+        with st.form("gross_billing_form"):
             sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
+            
+            def_pack = "00"
+            def_mrp = 0.0
+            if sel_prod != "00" and not MASTER_DF.empty:
+                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
+                if not m_match.empty:
+                    def_pack = str(m_match["pack"].values[0])
+                    def_mrp = float(m_match["mrp"].values[0])
+            
+            def_batch, def_exp = get_latest_batch_expiry(sel_prod)
 
-        with p2: m_pack = st.text_input("Pack", value="00")
-        with p3: m_batch = st.text_input("Batch", value="00")
-        with p4: m_exp = st.text_input("Expiry", value="00")
-        with p5: s_qty = st.number_input("Qty", min_value=0, value=0)
-        with p6: s_deal = st.text_input("Deal", value="00")
-        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0)
-        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
-        with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-        with p10:
-            if s_disc_pct > 0:
-                calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            else:
-                calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-            st.write(f"**Rate:** ₹{calc_rate}")
-            if st.button("➕ Add Item"):
+            p1, p2, p3, p4, p5, p6, p7, p8 = st.columns(8)
+            with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
+            with p2: m_pack = st.text_input("Pack", value=def_pack)
+            with p3: m_batch = st.text_input("Batch", value=def_batch)
+            with p4: m_exp = st.text_input("Expiry", value=def_exp)
+            with p5: s_deal = st.text_input("Deal", value="00")
+            with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
+            with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+            with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+            
+            submitted_gross = st.form_submit_button("➕ Add Gross Item")
+            if submitted_gross:
+                if s_disc_pct > 0:
+                    calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+                else:
+                    calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
                 amt = float(s_qty) * calc_rate
                 st.session_state["scanned_cart"].append({
                     "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
@@ -771,7 +802,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 merged['Avg Purchase Rate'] = merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                 merged['Net Stock Value (₹)'] = merged['Net Stock Qty'] * merged['Avg Purchase Rate']
                 
-                # Grand Totals Row Calculation
                 tot_p_qty = merged['Purchase_Qty'].sum()
                 tot_p_val = merged['Purchase_Value'].sum()
                 tot_s_qty = merged['Sales_Qty'].sum()
@@ -782,14 +812,12 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 display_df = merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                 display_df.columns = ['Product', 'Total Purchase Qty', 'Total Purchase Value (₹)', 'Total Sales Qty', 'Total Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                 
-                # Format Monetary values for display
                 display_df['Total Purchase Value (₹)'] = display_df['Total Purchase Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Total Sales Value (₹)'] = display_df['Total Sales Value (₹)'].map('₹ {:,.2f}'.format)
                 display_df['Net Stock Value (₹)'] = display_df['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
                 
                 st.dataframe(display_df, use_container_width=True)
                 
-                # Display Grand Total Metric Box
                 st.markdown("---")
                 st.markdown("### 📊 Grand Total Summary")
                 t1, t2, t3 = st.columns(3)
