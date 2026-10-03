@@ -10,7 +10,39 @@ import difflib
 import google.generativeai as genai
 from PIL import Image
 from supabase import create_client, Client
+def extract_master_products_with_ai(uploaded_file):
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
+        file_bytes = uploaded_file.getvalue()
+        mime_type = uploaded_file.type
+
+        prompt = """
+        You are an expert pharmaceutical ERP data parser. 
+        Extract all products from this document/image into a clean JSON array of objects.
+        Each object MUST have these exact keys:
+        - "product_name": String
+        - "pack": String
+        - "mrp": Float
+        - "rate": Float
+        - "gst": Float
+
+        Return ONLY raw JSON list, no markdown, no explanations.
+        """
+
+        response = model.generate_content([
+            {"mime_type": mime_type, "data": file_bytes},
+            prompt
+        ])
+
+        clean_json_str = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_json_str)
+        return pd.DataFrame(data)
+
+    except Exception as e:
+        st.error(f"❌ AI Extraction Error: {e}")
+        return pd.DataFrame()
 # ==========================================
 # PAGE CONFIG & STYLING (ORANGE THEME)
 # ==========================================
@@ -973,6 +1005,75 @@ elif active_tab == "👥 User Management (Admin)":
 # ==========================================
 elif active_tab == "🏷️ Manage Master Products":
     st.markdown("<h2 style='color: #E65100;'>🏷️ Manage Master Products List</h2>", unsafe_allow_html=True)
+    # --- AI & EXCEL BULK UPLOAD SECTION ---
+    st.markdown("### 📦 Bulk Product & Master List Manager (AI Scan & Excel)")
+    
+    upload_option = st.radio("Upload Method Select Karein:", ["🤖 AI Document Scanner (Photo/PDF)", "📊 Excel / CSV File Upload"], horizontal=True)
+
+    if upload_option == "🤖 AI Document Scanner (Photo/PDF)":
+        st.info("💡 Invoice, Rate List ya Product List ki photo/PDF upload karein. Gemini AI automatic details padh kar Master List bana dega.")
+        ai_file = st.file_uploader("Upload Product List Image or PDF", type=["jpg", "png", "jpeg", "pdf"], key="master_ai_uploader")
+
+        if st.button("🪄 Auto-Scan & Extract via AI", key="master_ai_btn"):
+            if ai_file:
+                with st.spinner("Scanning Document with Gemini AI..."):
+                    extracted_df = extract_master_products_with_ai(ai_file)
+                    if not extracted_df.empty:
+                        st.session_state["temp_master_upload"] = extracted_df
+                        st.success(f"✅ Gemini AI ne {len(extracted_df)} products successfully identify kar liye hain!")
+                    else:
+                        st.error("❌ Document se products scan nahi ho paye.")
+            else:
+                st.warning("Kripya pehle photo ya PDF select karein.")
+
+    else:
+        st.info("💡 Direct Excel (.xlsx) ya CSV file upload karke Master List update karein.")
+        excel_file = st.file_uploader("Upload Excel / CSV File", type=["csv", "xlsx"], key="master_excel_uploader")
+
+        if excel_file:
+            try:
+                if excel_file.name.endswith(".csv"):
+                    df_up = pd.read_csv(excel_file)
+                else:
+                    df_up = pd.read_excel(excel_file)
+                st.session_state["temp_master_upload"] = df_up
+                st.success(f"✅ Excel file se {len(df_up)} rows load ho gayi hain.")
+            except Exception as e:
+                st.error(f"❌ File read karne mein error: {e}")
+
+    # Preview & Save to Database Section
+    if "temp_master_upload" in st.session_state and not st.session_state["temp_master_upload"].empty:
+        st.markdown("---")
+        st.subheader("📋 Extracted Data Preview (Editable)")
+        
+        edited_master_df = st.data_editor(
+            st.session_state["temp_master_upload"],
+            num_rows="dynamic",
+            use_container_width=True,
+            key="master_data_editor"
+        )
+
+        if st.button("💾 Save All Products to Supabase Master Database", use_container_width=True):
+            try:
+                records = edited_master_df.to_dict('records')
+                clean_records = []
+                for r in records:
+                    clean_records.append({
+                        "product_name": str(r.get("product_name", r.get("PRODUCT", ""))),
+                        "pack": str(r.get("pack", r.get("PACK", "10x10"))),
+                        "mrp": float(r.get("mrp", r.get("MRP", 0.0))),
+                        "rate": float(r.get("rate", r.get("RATE", 0.0))),
+                        "gst": float(r.get("gst", r.get("GST", 12.0)))
+                    })
+
+                supabase.table("master_products").upsert(clean_records).execute()
+                st.success("🎉 All products successfully added to Master List Database!")
+                del st.session_state["temp_master_upload"]
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Database Save Error: {e}")
+
+    st.markdown("---")
     
     m_col1, m_col2 = st.columns([1, 1])
     
