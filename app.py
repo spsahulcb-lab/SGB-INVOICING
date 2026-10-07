@@ -1118,27 +1118,78 @@ elif active_tab == "🏷️ Manage Master Products":
         st.markdown("### 📋 Editable Master Products Database")
         st.info("💡 **Tips:** Edit any cell and click 'Save Database Changes' to update.")
         
-        m_df = load_master_products()
-        display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
-        
-        edited_master_df = st.data_editor(
-            display_df,
-            key="master_db_editor",
-            num_rows="dynamic",
-            use_container_width=True
-        )
-        
-        if st.button("💾 Save Database Changes"):
-            sync_entire_master_products(edited_master_df)
-            st.success("✅ Master Database successfully updated!")
-            st.rerun()
+        def load_master_products():
+    if supabase:
+        try:
+            # Supabase table name 'products'
+            res = supabase.table("products").select("*").execute()
+            if res.data: 
+                return pd.DataFrame(res.data)
+        except Exception: 
+            pass
             
-        st.markdown("---")
-        st.markdown("##### 🗑️ Remove Product via Selectbox")
-        p_del_list = m_df["product_name"].tolist() if not m_df.empty else ["None"]
-        del_p = st.selectbox("Select Product to Delete", p_del_list)
-        if st.button("❌ Delete Product"):
-            if del_p != "None":
-                delete_master_product(del_p)
-                st.success(f"Product '{del_p}' permanently deleted from database.")
-                st.rerun()
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
+    conn.close()
+    return df
+
+def add_master_product(product_name, pack, mrp, rate, tax):
+    p_clean = product_name.strip()
+    if not p_clean: return
+    if supabase:
+        try: 
+            # Supabase table name 'products'
+            supabase.table("products").insert({"product_name": p_clean, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax}).execute()
+        except Exception as e: 
+            st.error(f"Supabase Add Error: {e}")
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", (p_clean, pack, mrp, rate, tax))
+    conn.commit()
+    conn.close()
+
+def delete_master_product(product_name):
+    if supabase:
+        try: 
+            # Supabase table name 'products'
+            supabase.table("products").delete().eq("product_name", product_name).execute()
+        except Exception: 
+            pass
+            
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM master_products WHERE product_name=?", (product_name,))
+    conn.commit()
+    conn.close()
+
+def sync_entire_master_products(edited_df):
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM master_products")
+    
+    records = []
+    for _, r in edited_df.iterrows():
+        p_name = str(r.get("product_name", "")).strip()
+        if p_name and p_name.lower() != "nan":
+            pack = str(r.get("pack", "00"))
+            mrp = clean_float(r.get("mrp"), 0.0)
+            tax = clean_float(r.get("tax"), 5.0)
+            rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
+            
+            c.execute("INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+                      (p_name, pack, mrp, rate, tax))
+            records.append({"product_name": p_name, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax})
+            
+    conn.commit()
+    conn.close()
+    
+    if supabase:
+        try:
+            # Supabase table name 'products'
+            supabase.table("products").delete().neq("id", -1).execute()
+            if records:
+                supabase.table("products").insert(records).execute()
+            st.success("✅ Master Products successfully synced to Supabase!")
+        except Exception as e: 
+            st.error(f"Database Save Error: {e}")
