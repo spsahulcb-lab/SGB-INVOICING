@@ -1074,25 +1074,43 @@ elif active_tab == "🏷️ Manage Master Products":
             key="master_data_editor"
         )
 
-        if st.button("💾 Save All Products to Supabase Master Database", use_container_width=True):
-            try:
-                records = edited_master_df.to_dict('records')
-                clean_records = []
-                for r in records:
-                    clean_records.append({
-                        "product_name": str(r.get("product_name", r.get("PRODUCT", ""))),
-                        "pack": str(r.get("pack", r.get("PACK", "10x10"))),
-                        "mrp": float(r.get("mrp", r.get("MRP", 0.0))),
-                        "rate": float(r.get("rate", r.get("RATE", 0.0))),
-                        "gst": float(r.get("gst", r.get("GST", 12.0)))
-                    })
-
-                supabase.table("master_products").upsert(clean_records).execute()
-                st.success("🎉 All products successfully added to Master List Database!")
-                del st.session_state["temp_master_upload"]
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Database Save Error: {e}")
+       # --- SAVE ALL EXTRACTED PRODUCTS TO SUPABASE ---
+if st.button("💾 Save All Products to Supabase Master Database", type="primary", use_container_width=True):
+    if 'extracted_df' in st.session_state and not st.session_state['extracted_df'].empty:
+        df_to_save = st.session_state['extracted_df']
+        records = []
+        
+        for _, row in df_to_save.iterrows():
+            p_name = str(row.get('Product', row.get('product_name', ''))).strip()
+            if p_name and p_name.lower() != 'nan' and p_name != 'Product':
+                mrp_val = clean_float(row.get('Mrp', row.get('mrp', 0.0)))
+                rate_val = clean_float(row.get('Rate', row.get('rate', 0.0)))
+                tax_str = str(row.get('Tax', row.get('tax', '5.0')))
+                tax_val = clean_float(tax_str)
+                pack_val = str(row.get('Pack', row.get('pack', '00')))
+                
+                records.append({
+                    "product_name": p_name,
+                    "pack": pack_val,
+                    "mrp": mrp_val,
+                    "rate": rate_val,
+                    "tax": tax_val
+                })
+        
+        if records:
+            if supabase:
+                try:
+                    # 'master_products' ki jagah sahi table name 'products' use karein
+                    supabase.table("products").upsert(records, on_conflict="product_name").execute()
+                    st.success(f"✅ Successfully saved/updated {len(records)} products in Supabase Master Database!")
+                except Exception as e:
+                    st.error(f"Database Save Error: {e}")
+            else:
+                st.warning("⚠️ Supabase connection is not active.")
+        else:
+            st.warning("⚠️ No valid products found to save.")
+    else:
+        st.warning("⚠️ No extracted data available to save.")
 
     st.markdown("---")
     
