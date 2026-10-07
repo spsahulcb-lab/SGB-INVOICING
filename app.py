@@ -214,16 +214,25 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
     conn.close()
 
 def load_transaction_data(table_name):
+    # Pehle Supabase se fetch karne ki koshish karein
     if supabase:
         try:
             res = supabase.table(table_name).select("*").order("id", desc=True).execute()
-            if res.data: return pd.DataFrame(res.data)
-        except Exception: pass
+            if res.data and len(res.data) > 0:
+                return pd.DataFrame(res.data)
+            else:
+                st.info(f"Supabase '{table_name}' table is empty.")
+        except Exception as e:
+            st.error(f"Supabase Connection Error: {e}")
             
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC", conn)
-    conn.close()
-    return df
+    # Agar Supabase na ho tabhi SQLite try karein
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC", conn)
+        conn.close()
+        return df
+    except Exception as e:
+        return pd.DataFrame()
 
 def load_all_users():
     if supabase:
