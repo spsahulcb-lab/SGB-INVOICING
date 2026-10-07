@@ -236,19 +236,16 @@ def load_transaction_data(table_name):
             res = supabase.table(supabase_table).select("*").order("id", desc=True).execute()
             if res.data: 
                 return pd.DataFrame(res.data)
-        except Exception as e:
+        except Exception:
             pass
             
-    conn = sqlite3.connect(DB_FILE)
     try:
+        conn = sqlite3.connect(DB_FILE)
         df = pd.read_sql_query(f"SELECT * FROM {table_name} ORDER BY id DESC", conn)
+        conn.close()
+        return df
     except Exception:
-        df = pd.DataFrame()
-    conn.close()
-    return df
-    except Exception as e:
         return pd.DataFrame()
-
 def load_all_users():
     if supabase:
         try:
