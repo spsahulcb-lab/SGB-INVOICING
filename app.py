@@ -94,7 +94,6 @@ def init_local_db():
 
 init_local_db()
 
-@st.cache_resource
 def get_supabase_client():
     if "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
         try:
@@ -102,7 +101,9 @@ def get_supabase_client():
             key = st.secrets["SUPABASE_KEY"]
             if "supabase.co" in url:
                 return create_client(url, key)
-        except Exception: return None
+        except Exception as e:
+            st.error(f"Supabase Auth Error: {e}")
+            return None
     return None
 
 supabase = get_supabase_client()
