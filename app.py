@@ -1121,53 +1121,63 @@ elif active_tab == "🏷️ Manage Master Products":
 def load_master_products():
     if supabase:
         try:
-            # Supabase table name 'products'
             res = supabase.table("products").select("*").execute()
-            if res.data: 
+            if res.data:
                 return pd.DataFrame(res.data)
-        except Exception: 
+        except Exception:
             pass
-            
+
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
     conn.close()
     return df
 
+
 def add_master_product(product_name, pack, mrp, rate, tax):
     p_clean = product_name.strip()
-    if not p_clean: return
+    if not p_clean:
+        return
     if supabase:
-        try: 
-            # Supabase table name 'products'
-            supabase.table("products").insert({"product_name": p_clean, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax}).execute()
-        except Exception as e: 
+        try:
+            supabase.table("products").insert({
+                "product_name": p_clean,
+                "pack": pack,
+                "mrp": mrp,
+                "rate": rate,
+                "tax": tax
+            }).execute()
+        except Exception as e:
             st.error(f"Supabase Add Error: {e}")
-            
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
-    c.execute("INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)", (p_clean, pack, mrp, rate, tax))
+    c.execute(
+        "INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+        (p_clean, pack, mrp, rate, tax)
+    )
     conn.commit()
     conn.close()
 
+
 def delete_master_product(product_name):
     if supabase:
-        try: 
-            # Supabase table name 'products'
+        try:
             supabase.table("products").delete().eq("product_name", product_name).execute()
-        except Exception: 
+        except Exception:
             pass
-            
+
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM master_products WHERE product_name=?", (product_name,))
     conn.commit()
     conn.close()
 
+
 def sync_entire_master_products(edited_df):
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM master_products")
-    
+
     records = []
     for _, r in edited_df.iterrows():
         p_name = str(r.get("product_name", "")).strip()
@@ -1176,20 +1186,27 @@ def sync_entire_master_products(edited_df):
             mrp = clean_float(r.get("mrp"), 0.0)
             tax = clean_float(r.get("tax"), 5.0)
             rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
-            
-            c.execute("INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
-                      (p_name, pack, mrp, rate, tax))
-            records.append({"product_name": p_name, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax})
-            
+
+            c.execute(
+                "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+                (p_name, pack, mrp, rate, tax)
+            )
+            records.append({
+                "product_name": p_name,
+                "pack": pack,
+                "mrp": mrp,
+                "rate": rate,
+                "tax": tax
+            })
+
     conn.commit()
     conn.close()
-    
+
     if supabase:
         try:
-            # Supabase table name 'products'
             supabase.table("products").delete().neq("id", -1).execute()
             if records:
                 supabase.table("products").insert(records).execute()
             st.success("✅ Master Products successfully synced to Supabase!")
-        except Exception as e: 
+        except Exception as e:
             st.error(f"Database Save Error: {e}")
