@@ -1118,7 +1118,7 @@ elif active_tab == "🏷️ Manage Master Products":
         st.markdown("### 📋 Editable Master Products Database")
         st.info("💡 **Tips:** Edit any cell and click 'Save Database Changes' to update.")
         
-        def load_master_products():
+def load_master_products():
     if supabase:
         try:
             # Supabase table name 'products'
