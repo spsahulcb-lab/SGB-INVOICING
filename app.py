@@ -1048,7 +1048,7 @@ elif active_tab == "🏷️ Manage Master Products":
             else:
                 st.warning("Kripya pehle photo ya PDF select karein.")
 
-   else:
+    else:
         st.info("💡 Direct Excel (.xlsx) ya CSV file upload karke Master List update karein.")
         excel_file = st.file_uploader("Upload Excel / CSV File", type=["csv", "xlsx", "xls"], key="master_excel_uploader")
 
