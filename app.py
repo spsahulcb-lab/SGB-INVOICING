@@ -1026,8 +1026,6 @@ elif active_tab == "👥 User Management (Admin)":
 # ==========================================
 elif active_tab == "🏷️ Manage Master Products":
     st.markdown("<h2 style='color: #E65100;'>🏷️ Manage Master Products List</h2>", unsafe_allow_html=True)
-    
-    # --- AI & EXCEL BULK UPLOAD SECTION ---
     st.markdown("### 📦 Bulk Product & Master List Manager (AI Scan & Excel)")
     
     upload_option = st.radio("Upload Method Select Karein:", ["🤖 AI Document Scanner (Photo/PDF)", "📊 Excel / CSV File Upload"], horizontal=True)
@@ -1059,9 +1057,8 @@ elif active_tab == "🏷️ Manage Master Products":
                 else:
                     df_up = pd.read_excel(excel_file)
                 
-                # Header row autodetect: Agar pehle row me 'Unnamed' ho toh header dhundho
+                # Auto-detect header row if extra header rows exist
                 if any("unnamed" in str(col).lower() for col in df_up.columns):
-                    # Check first 5 rows for actual column headers
                     for idx in range(min(5, len(df_up))):
                         row_vals = [str(x).strip().lower() for x in df_up.iloc[idx].values]
                         if any("product" in v for v in row_vals):
@@ -1069,14 +1066,13 @@ elif active_tab == "🏷️ Manage Master Products":
                             df_up = df_up.iloc[idx+1:].reset_index(drop=True)
                             break
 
-                # Standardize column names
                 df_up.columns = [str(c).strip().title() for c in df_up.columns]
                 st.session_state["temp_master_upload"] = df_up
                 st.success(f"✅ Excel file se {len(df_up)} rows load ho gayi hain.")
             except Exception as e:
                 st.error(f"❌ File read karne mein error: {e}")
 
-    # --- PREVIEW & SAVE TO DATABASE SECTION ---
+    # PREVIEW & SAVE SECTION
     if "temp_master_upload" in st.session_state and not st.session_state["temp_master_upload"].empty:
         st.markdown("---")
         st.subheader("📋 Extracted Data Preview (Editable)")
@@ -1088,51 +1084,15 @@ elif active_tab == "🏷️ Manage Master Products":
             key="master_data_editor"
         )
 
-       # SAVE ALL EXTRACTED PRODUCTS TO SUPABASE
-        if st.button("💾 Save All Products to Supabase Master Database", type="primary", use_container_width=True):
+        if st.button("💾 Save All Products to Master Database", type="primary", use_container_width=True):
             df_to_save = edited_master_df if edited_master_df is not None else st.session_state["temp_master_upload"]
-            records = []
             
-            for _, row in df_to_save.iterrows():
-                # Dynamic column finding
-                row_dict = {str(k).strip().lower(): v for k, v in row.items()}
-                
-                # Fetch values
-                p_name = ""
-                for k in ["product", "product_name", "product name", "item", "item_name"]:
-                    if k in row_dict and pd.notna(row_dict[k]):
-                        p_name = str(row_dict[k]).strip()
-                        break
-                
-                if p_name and p_name.lower() not in ['nan', 'none', 'product', 'product name', '']:
-                    mrp_val = clean_float(row_dict.get('mrp', row_dict.get('m.r.p.', 0.0)))
-                    rate_val = clean_float(row_dict.get('rate', row_dict.get('net rate', 0.0)))
-                    tax_str = str(row_dict.get('tax', row_dict.get('gst', '5.0'))).replace('GST', '').replace('%', '').strip()
-                    tax_val = clean_float(tax_str, 5.0)
-                    pack_val = str(row_dict.get('pack', row_dict.get('packing', '00')))
-                    
-                    records.append({
-                        "product_name": p_name,
-                        "pack": pack_val,
-                        "mrp": mrp_val,
-                        "rate": rate_val,
-                        "tax": tax_val
-                    })
-            
-            if records:
-                if supabase:
-                    try:
-                        supabase.table("products").upsert(records, on_conflict="product_name").execute()
-                        st.success(f"✅ Successfully saved {len(records)} products in Supabase Master Database!")
-                        if "temp_master_upload" in st.session_state:
-                            del st.session_state["temp_master_upload"]
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Database Save Error: {e}")
-                else:
-                    st.warning("⚠️ Supabase connection is not active.")
-            else:
-                st.warning("⚠️ No valid products found to save.")
+            # Simple & Original Direct Bulk Insert / Sync Logic
+            sync_entire_master_products(df_to_save)
+            if "temp_master_upload" in st.session_state:
+                del st.session_state["temp_master_upload"]
+            st.rerun()
+
     st.markdown("---")
     
     m_col1, m_col2 = st.columns([1, 1])
@@ -1162,7 +1122,7 @@ elif active_tab == "🏷️ Manage Master Products":
             st.info("Master database abhi khali hai.")
 
 # ==========================================
-# HELPER FUNCTIONS FOR MASTER PRODUCTS
+# ORIGINAL & RELIABLE HELPER FUNCTIONS
 # ==========================================
 def load_master_products():
     if supabase:
@@ -1185,13 +1145,13 @@ def add_master_product(product_name, pack, mrp, rate, tax):
         return
     if supabase:
         try:
-            supabase.table("products").insert({
+            supabase.table("products").upsert({
                 "product_name": p_clean,
-                "pack": pack,
-                "mrp": mrp,
-                "rate": rate,
+                "pack": str(pack),
+                "mrp": clean_float(mrp),
+                "rate": clean_float(rate),
                 "tax": tax
-            }).execute()
+            }, on_conflict="product_name").execute()
         except Exception as e:
             st.error(f"Supabase Add Error: {e}")
 
@@ -1199,45 +1159,44 @@ def add_master_product(product_name, pack, mrp, rate, tax):
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
-        (p_clean, pack, mrp, rate, tax)
+        (p_clean, str(pack), clean_float(mrp), clean_float(rate), clean_float(tax))
     )
     conn.commit()
     conn.close()
 
 
-def delete_master_product(product_name):
-    if supabase:
-        try:
-            supabase.table("products").delete().eq("product_name", product_name).execute()
-        except Exception:
-            pass
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("DELETE FROM master_products WHERE product_name=?", (product_name,))
-    conn.commit()
-    conn.close()
-
-
-def sync_entire_master_products(edited_df):
+def sync_entire_master_products(df_input):
+    records_supabase = []
+    
+    # SQLite Clean Reset
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM master_products")
 
-    records = []
-    for _, r in edited_df.iterrows():
-        p_name = str(r.get("product_name", "")).strip()
-        if p_name and p_name.lower() != "nan":
-            pack = str(r.get("pack", "00"))
-            mrp = clean_float(r.get("mrp"), 0.0)
-            tax = clean_float(r.get("tax"), 5.0)
-            rate = clean_float(r.get("rate"), round((mrp * 80.0) / (100.0 + tax), 2))
+    for _, r in df_input.iterrows():
+        # Universal Column Value Extraction
+        row_dict = {str(k).strip().lower(): v for k, v in r.items()}
+        
+        p_name = ""
+        for k in ["product", "product_name", "product name", "item", "item_name"]:
+            if k in row_dict and pd.notna(row_dict[k]):
+                p_name = str(row_dict[k]).strip()
+                break
 
+        if p_name and p_name.lower() not in ["nan", "none", "product", "product name", ""]:
+            pack = str(row_dict.get("pack", row_dict.get("packing", "00"))).strip()
+            mrp = clean_float(row_dict.get("mrp", row_dict.get("m.r.p.", 0.0)))
+            tax = clean_float(str(row_dict.get("tax", row_dict.get("gst", "5.0"))).replace("%", "").replace("GST", ""))
+            rate = clean_float(row_dict.get("rate", row_dict.get("net rate", 0.0)))
+
+            # Save to Local SQLite
             c.execute(
                 "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
                 (p_name, pack, mrp, rate, tax)
             )
-            records.append({
+            
+            # Prepare for Cloud Supabase
+            records_supabase.append({
                 "product_name": p_name,
                 "pack": pack,
                 "mrp": mrp,
@@ -1248,11 +1207,12 @@ def sync_entire_master_products(edited_df):
     conn.commit()
     conn.close()
 
-    if supabase:
+    # Push to Supabase Cloud Database
+    if supabase and records_supabase:
         try:
-            supabase.table("products").delete().neq("id", -1).execute()
-            if records:
-                supabase.table("products").insert(records).execute()
-            st.success("✅ Master Products successfully synced to Supabase!")
+            supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
+            st.success(f"✅ Master List successfully saved/updated ({len(records_supabase)} Products)!")
         except Exception as e:
-            st.error(f"Database Save Error: {e}")
+            st.error(f"Supabase Cloud Save Error: {e}")
+    else:
+        st.success(f"✅ Master List saved locally ({len(records_supabase)} Products)!")
