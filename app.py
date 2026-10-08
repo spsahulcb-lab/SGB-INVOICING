@@ -1026,6 +1026,7 @@ elif active_tab == "👥 User Management (Admin)":
 # ==========================================
 elif active_tab == "🏷️ Manage Master Products":
     st.markdown("<h2 style='color: #E65100;'>🏷️ Manage Master Products List</h2>", unsafe_allow_html=True)
+    
     # --- AI & EXCEL BULK UPLOAD SECTION ---
     st.markdown("### 📦 Bulk Product & Master List Manager (AI Scan & Excel)")
     
@@ -1057,12 +1058,15 @@ elif active_tab == "🏷️ Manage Master Products":
                     df_up = pd.read_csv(excel_file)
                 else:
                     df_up = pd.read_excel(excel_file)
+                
+                # Standardize column names
+                df_up.columns = [str(c).strip().title() for c in df_up.columns]
                 st.session_state["temp_master_upload"] = df_up
                 st.success(f"✅ Excel file se {len(df_up)} rows load ho gayi hain.")
             except Exception as e:
                 st.error(f"❌ File read karne mein error: {e}")
 
-    # Preview & Save to Database Section
+    # --- PREVIEW & SAVE TO DATABASE SECTION ---
     if "temp_master_upload" in st.session_state and not st.session_state["temp_master_upload"].empty:
         st.markdown("---")
         st.subheader("📋 Extracted Data Preview (Editable)")
@@ -1074,43 +1078,44 @@ elif active_tab == "🏷️ Manage Master Products":
             key="master_data_editor"
         )
 
-       # --- SAVE ALL EXTRACTED PRODUCTS TO SUPABASE ---
-if st.button("💾 Save All Products to Supabase Master Database", type="primary", use_container_width=True):
-    if 'extracted_df' in st.session_state and not st.session_state['extracted_df'].empty:
-        df_to_save = st.session_state['extracted_df']
-        records = []
-        
-        for _, row in df_to_save.iterrows():
-            p_name = str(row.get('Product', row.get('product_name', ''))).strip()
-            if p_name and p_name.lower() != 'nan' and p_name != 'Product':
-                mrp_val = clean_float(row.get('Mrp', row.get('mrp', 0.0)))
-                rate_val = clean_float(row.get('Rate', row.get('rate', 0.0)))
-                tax_str = str(row.get('Tax', row.get('tax', '5.0')))
-                tax_val = clean_float(tax_str)
-                pack_val = str(row.get('Pack', row.get('pack', '00')))
+        # SAVE ALL EXTRACTED PRODUCTS TO SUPABASE
+        if st.button("💾 Save All Products to Supabase Master Database", type="primary", use_container_width=True):
+            df_to_save = edited_master_df if edited_master_df is not None else st.session_state["temp_master_upload"]
+            records = []
+            
+            for _, row in df_to_save.iterrows():
+                # Handle all possible column name formats (Product / product_name / Product_Name)
+                p_name = str(row.get('Product', row.get('product_name', row.get('Product_Name', '')))).strip()
                 
-                records.append({
-                    "product_name": p_name,
-                    "pack": pack_val,
-                    "mrp": mrp_val,
-                    "rate": rate_val,
-                    "tax": tax_val
-                })
-        
-        if records:
-            if supabase:
-                try:
-                    # 'master_products' ki jagah sahi table name 'products' use karein
-                    supabase.table("products").upsert(records, on_conflict="product_name").execute()
-                    st.success(f"✅ Successfully saved/updated {len(records)} products in Supabase Master Database!")
-                except Exception as e:
-                    st.error(f"Database Save Error: {e}")
+                if p_name and p_name.lower() != 'nan' and p_name != 'None':
+                    mrp_val = clean_float(row.get('Mrp', row.get('mrp', 0.0)))
+                    rate_val = clean_float(row.get('Rate', row.get('rate', 0.0)))
+                    tax_str = str(row.get('Tax', row.get('tax', '5.0'))).replace('GST', '').replace('%', '').strip()
+                    tax_val = clean_float(tax_str, 5.0)
+                    pack_val = str(row.get('Pack', row.get('pack', '00')))
+                    
+                    records.append({
+                        "product_name": p_name,
+                        "pack": pack_val,
+                        "mrp": mrp_val,
+                        "rate": rate_val,
+                        "tax": tax_val
+                    })
+            
+            if records:
+                if supabase:
+                    try:
+                        supabase.table("products").upsert(records, on_conflict="product_name").execute()
+                        st.success(f"✅ Successfully saved/updated {len(records)} products in Supabase Master Database!")
+                        # Buffer clear karke UI refresh karein
+                        del st.session_state["temp_master_upload"]
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Database Save Error: {e}")
+                else:
+                    st.warning("⚠️ Supabase connection is not active.")
             else:
-                st.warning("⚠️ Supabase connection is not active.")
-        else:
-            st.warning("⚠️ No valid products found to save.")
-    else:
-        st.warning("⚠️ No extracted data available to save.")
+                st.warning("⚠️ No valid products found to save.")
 
     st.markdown("---")
     
@@ -1133,9 +1138,16 @@ if st.button("💾 Save All Products to Supabase Master Database", type="primary
                 st.rerun()
 
     with m_col2:
-        st.markdown("### 📋 Editable Master Products Database")
-        st.info("💡 **Tips:** Edit any cell and click 'Save Database Changes' to update.")
-        
+        st.markdown("### 📋 Current Master Products Database")
+        existing_df = load_master_products()
+        if not existing_df.empty:
+            st.dataframe(existing_df, use_container_width=True)
+        else:
+            st.info("Master database abhi khali hai.")
+
+# ==========================================
+# HELPER FUNCTIONS FOR MASTER PRODUCTS
+# ==========================================
 def load_master_products():
     if supabase:
         try:
