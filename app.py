@@ -477,24 +477,24 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     st.markdown("---")
     
-    st.subheader("📝 Wholesale Bill Meta Info (Fully Editable)")
+    st.subheader("📝 Wholesale Bill Meta Info")
     f1, f2, f3 = st.columns(3)
     
     existing_parties = get_existing_parties()
     with f1:
         party_mode = st.radio("Party Input Mode:", ["Select Saved Party", "Type New Party"], horizontal=True)
         if party_mode == "Select Saved Party" and existing_parties:
-            sel_saved_party = st.selectbox("Select Party / Medical Store", existing_parties)
-            party_name = st.text_input("Or Edit Party Name", value=sel_saved_party)
+            party_name = st.selectbox("Select Party / Medical Store", existing_parties)
         else:
-            party_name = st.text_input("Party / Supplier / Medical Store Name", value="Sharma Medical Hall")
+            party_name = st.text_input("Party / Supplier / Medical Store Name", value="00")
             
-    with f2: inv_no = st.text_input("Invoice No", value=f"INV-{int(datetime.now().timestamp())}")
-    with f3: gst_no = st.text_input("Party GSTIN", value="09AAAAA0000A1Z5")
+    with f2: inv_no = st.text_input("Invoice No", value="00")
+    with f3: gst_no = st.text_input("Party GSTIN", value="00")
 
     st.markdown("##### ➕ Compact Manual Item Addition")
     rate_mode = st.radio("Select Billing Mode:", ["NET RATE Mode (0% GST)", "Gross Rate Mode (With GST)"], horizontal=True)
 
+    # Compact Form Layout to minimize scrolling
     if rate_mode == "NET RATE Mode (0% GST)":
         with st.form("net_billing_form", clear_on_submit=False):
             st.markdown("<div class='compact-form'>", unsafe_allow_html=True)
@@ -581,8 +581,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
 
     if st.session_state["scanned_cart"]:
         st.markdown("---")
-        st.subheader("🛒 Current Bill Items (Fully Editable Table)")
-        st.info("💡 Aap table ke kisi bhi column (Product, Pack, Batch, Expiry, Qty, MRP, Rate, GST) par click karke direct edit kar sakte hain!")
+        st.subheader("🛒 Current Bill Items")
         
         cart_df = pd.DataFrame(st.session_state["scanned_cart"])
         
@@ -590,15 +589,10 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             cart_df, 
             key="cart_editor", 
             num_rows="dynamic",
+            disabled=["AMOUNT"], 
             use_container_width=True
         )
         
-        # Auto-recalculate amount if Qty or Rate changes in editor
-        for idx, row in edited_df.iterrows():
-            q = clean_float(row.get('QTY', 0))
-            rt = clean_float(row.get('RATE', 0))
-            edited_df.loc[idx, 'AMOUNT'] = round(q * rt, 2)
-
         st.session_state["scanned_cart"] = edited_df.to_dict('records')
         
         o_col1, o_col2 = st.columns([2, 1])
