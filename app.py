@@ -1048,7 +1048,7 @@ elif active_tab == "🏷️ Manage Master Products":
             else:
                 st.warning("Kripya pehle photo ya PDF select karein.")
 
-    else:
+   else:
         st.info("💡 Direct Excel (.xlsx) ya CSV file upload karke Master List update karein.")
         excel_file = st.file_uploader("Upload Excel / CSV File", type=["csv", "xlsx", "xls"], key="master_excel_uploader")
 
@@ -1059,6 +1059,16 @@ elif active_tab == "🏷️ Manage Master Products":
                 else:
                     df_up = pd.read_excel(excel_file)
                 
+                # Header row autodetect: Agar pehle row me 'Unnamed' ho toh header dhundho
+                if any("unnamed" in str(col).lower() for col in df_up.columns):
+                    # Check first 5 rows for actual column headers
+                    for idx in range(min(5, len(df_up))):
+                        row_vals = [str(x).strip().lower() for x in df_up.iloc[idx].values]
+                        if any("product" in v for v in row_vals):
+                            df_up.columns = [str(x).strip() for x in df_up.iloc[idx].values]
+                            df_up = df_up.iloc[idx+1:].reset_index(drop=True)
+                            break
+
                 # Standardize column names
                 df_up.columns = [str(c).strip().title() for c in df_up.columns]
                 st.session_state["temp_master_upload"] = df_up
@@ -1078,21 +1088,28 @@ elif active_tab == "🏷️ Manage Master Products":
             key="master_data_editor"
         )
 
-        # SAVE ALL EXTRACTED PRODUCTS TO SUPABASE
+       # SAVE ALL EXTRACTED PRODUCTS TO SUPABASE
         if st.button("💾 Save All Products to Supabase Master Database", type="primary", use_container_width=True):
             df_to_save = edited_master_df if edited_master_df is not None else st.session_state["temp_master_upload"]
             records = []
             
             for _, row in df_to_save.iterrows():
-                # Handle all possible column name formats (Product / product_name / Product_Name)
-                p_name = str(row.get('Product', row.get('product_name', row.get('Product_Name', '')))).strip()
+                # Dynamic column finding
+                row_dict = {str(k).strip().lower(): v for k, v in row.items()}
                 
-                if p_name and p_name.lower() != 'nan' and p_name != 'None':
-                    mrp_val = clean_float(row.get('Mrp', row.get('mrp', 0.0)))
-                    rate_val = clean_float(row.get('Rate', row.get('rate', 0.0)))
-                    tax_str = str(row.get('Tax', row.get('tax', '5.0'))).replace('GST', '').replace('%', '').strip()
+                # Fetch values
+                p_name = ""
+                for k in ["product", "product_name", "product name", "item", "item_name"]:
+                    if k in row_dict and pd.notna(row_dict[k]):
+                        p_name = str(row_dict[k]).strip()
+                        break
+                
+                if p_name and p_name.lower() not in ['nan', 'none', 'product', 'product name', '']:
+                    mrp_val = clean_float(row_dict.get('mrp', row_dict.get('m.r.p.', 0.0)))
+                    rate_val = clean_float(row_dict.get('rate', row_dict.get('net rate', 0.0)))
+                    tax_str = str(row_dict.get('tax', row_dict.get('gst', '5.0'))).replace('GST', '').replace('%', '').strip()
                     tax_val = clean_float(tax_str, 5.0)
-                    pack_val = str(row.get('Pack', row.get('pack', '00')))
+                    pack_val = str(row_dict.get('pack', row_dict.get('packing', '00')))
                     
                     records.append({
                         "product_name": p_name,
@@ -1106,9 +1123,9 @@ elif active_tab == "🏷️ Manage Master Products":
                 if supabase:
                     try:
                         supabase.table("products").upsert(records, on_conflict="product_name").execute()
-                        st.success(f"✅ Successfully saved/updated {len(records)} products in Supabase Master Database!")
-                        # Buffer clear karke UI refresh karein
-                        del st.session_state["temp_master_upload"]
+                        st.success(f"✅ Successfully saved {len(records)} products in Supabase Master Database!")
+                        if "temp_master_upload" in st.session_state:
+                            del st.session_state["temp_master_upload"]
                         st.rerun()
                     except Exception as e:
                         st.error(f"Database Save Error: {e}")
@@ -1116,7 +1133,6 @@ elif active_tab == "🏷️ Manage Master Products":
                     st.warning("⚠️ Supabase connection is not active.")
             else:
                 st.warning("⚠️ No valid products found to save.")
-
     st.markdown("---")
     
     m_col1, m_col2 = st.columns([1, 1])
