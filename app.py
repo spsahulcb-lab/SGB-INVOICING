@@ -451,9 +451,7 @@ if st.sidebar.button("🚪 Logout"):
 # 1. AI SMART SCAN & BILLING
 # ==========================================
 elif active_tab == "🤖 AI Smart Scan & Billing":
-    st.markdown("
-🤖 AI Scanner & Wholesale Billing
-", unsafe_allow_html=True)
+    st.markdown("AI Scanner & Wholesale Billing", unsafe_allow_html=True)
 
 c1, c2 = st.columns(2)
 with c1: uploaded_img = st.file_uploader("📷 Upload Invoice / Order Slip", type=["jpg", "png", "jpeg"])
