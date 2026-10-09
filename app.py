@@ -747,16 +747,17 @@ if rate_mode == "NET RATE Mode (0% GST)":
 
         submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
 
-    if submitted_net and sel_prod != "00":
+   if submitted_net and sel_prod != "00":
         calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
         amt = float(s_qty) * calc_net_rate
         st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
+            "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+            "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
+            "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+            "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
+        })
+        st.rerun()
+
 else:
     with st.form("gross_billing_form", clear_on_submit=False):
         r1_c1, r1_c2, r1_c3, r1_c4 = st.columns(4)
@@ -773,7 +774,6 @@ else:
         s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
 
         submitted_gross = st.form_submit_button("➕ Add Gross Item to Bill")
-        
 
         if submitted_gross and sel_prod != "00":
             if s_disc_pct > 0:
