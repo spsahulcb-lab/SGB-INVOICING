@@ -242,9 +242,12 @@ def clean_float(val, default=0.0):
 def filter_by_date_range(df, start_date, end_date, date_col='created_at'):
     if df.empty or date_col not in df.columns:
         return df
+    
+    # Convert column to datetime
     temp_dates = pd.to_datetime(df[date_col], errors='coerce').dt.date
     s_date = start_date if isinstance(start_date, date) else pd.to_datetime(start_date).date()
     e_date = end_date if isinstance(end_date, date) else pd.to_datetime(end_date).date()
+    
     return df[(temp_dates >= s_date) & (temp_dates <= e_date)]
 
 def get_existing_parties():
@@ -253,18 +256,6 @@ def get_existing_parties():
     p1 = sales_df['party'].dropna().unique().tolist() if not sales_df.empty else []
     p2 = pur_df['party'].dropna().unique().tolist() if not pur_df.empty else []
     return sorted(list(set(p1 + p2)))
-
-def get_latest_batch_expiry(product_name):
-    """Fetch latest batch and expiry from purchase history for a product"""
-    df_pur = load_transaction_data("purchase")
-    if not df_pur.empty and 'product' in df_pur.columns:
-        prod_pur = df_pur[df_pur['product'] == product_name]
-        if not prod_pur.empty:
-            latest_row = prod_pur.iloc[0]
-            batch = str(latest_row.get('batch', '00'))
-            expiry = str(latest_row.get('expiry', '00'))
-            return batch if batch and batch != 'nan' else '00', expiry if expiry and expiry != 'nan' else '00'
-    return '00', '00'
 
 # ==========================================
 # GEMINI AI SETUP
@@ -490,34 +481,19 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     rate_mode = st.radio("Select Billing Mode for Manual Addition:", ["NET RATE Mode (GST Excluded / 0%)", "Gross Rate Mode (With GST)"], horizontal=True)
 
     if rate_mode == "NET RATE Mode (GST Excluded / 0%)":
-        # Product Selection First to Fetch Master Data & Purchase History
-        p1_col, p2_col = st.columns([2, 1])
-        with p1_col:
+        p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([2, 0.8, 1, 0.8, 0.8, 1, 1, 1])
+        with p1: 
             sel_prod = st.selectbox("Product (NET RATE)", MASTER_LIST, index=0)
             
-        # Fetch Master Details & Latest Batch/Expiry automatically
-        default_pack = "00"
-        default_mrp = 0.0
-        if sel_prod != "00" and not MASTER_DF.empty:
-            match_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
-            if not match_row.empty:
-                default_pack = str(match_row["pack"].values[0])
-                default_mrp = float(match_row["mrp"].values[0])
-                
-        auto_batch, auto_exp = get_latest_batch_expiry(sel_prod)
-
-        p1, p2, p3, p4, p5, p6, p7, p8 = st.columns([1.5, 0.8, 1, 0.8, 0.8, 1, 1, 1])
-        with p1: s_qty = st.number_input("Qty", min_value=0, value=0, key="net_qty")
-        with p2: m_pack = st.text_input("Pack", value=default_pack, key="net_pack")
-        with p3: m_batch = st.text_input("Batch", value=auto_batch, key="net_batch")
-        with p4: m_exp = st.text_input("Expiry", value=auto_exp, key="net_exp")
-        with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp, key="net_mrp")
-        with p6: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
-        with p7:
+        with p2: m_pack = st.text_input("Pack", value="00", key="net_pack")
+        with p3: m_batch = st.text_input("Batch", value="00", key="net_batch")
+        with p4: m_exp = st.text_input("Expiry", value="00", key="net_exp")
+        with p5: s_qty = st.number_input("Qty", min_value=0, value=0, key="net_qty")
+        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0, key="net_mrp")
+        with p7: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0, key="net_disc")
+        with p8:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             st.write(f"**Net Rate:** ₹{calc_net_rate}")
-        with p8:
-            st.write("") # spacing alignment
             if st.button("➕ Add Net Item"):
                 amt = float(s_qty) * calc_net_rate
                 st.session_state["scanned_cart"].append({
@@ -528,38 +504,24 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 })
                 st.rerun()
     else:
-        # Gross Rate Mode
-        gp1_col, gp2_col = st.columns([2, 1])
-        with gp1_col:
-            sel_prod = st.selectbox("Product", MASTER_LIST, index=0, key="gross_prod")
-            
-        default_pack = "00"
-        default_mrp = 0.0
-        if sel_prod != "00" and not MASTER_DF.empty:
-            match_row = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
-            if not match_row.empty:
-                default_pack = str(match_row["pack"].values[0])
-                default_mrp = float(match_row["mrp"].values[0])
-                
-        auto_batch, auto_exp = get_latest_batch_expiry(sel_prod)
+        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.8, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
+        with p1: 
+            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
 
-        p1, p2, p3, p4, p5, p6, p7, p8, p9, p10 = st.columns([1.5, 0.8, 0.9, 0.8, 0.8, 0.8, 1, 0.8, 0.8, 0.8])
-        with p1: s_qty = st.number_input("Qty", min_value=0, value=0, key="g_qty")
-        with p2: m_pack = st.text_input("Pack", value=default_pack, key="g_pack")
-        with p3: m_batch = st.text_input("Batch", value=auto_batch, key="g_batch")
-        with p4: m_exp = st.text_input("Expiry", value=auto_exp, key="g_exp")
-        with p5: s_deal = st.text_input("Deal", value="00", key="g_deal")
-        with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=default_mrp, key="g_mrp")
-        with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0, key="g_gst")
-        with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0, key="g_disc")
-        with p9:
+        with p2: m_pack = st.text_input("Pack", value="00")
+        with p3: m_batch = st.text_input("Batch", value="00")
+        with p4: m_exp = st.text_input("Expiry", value="00")
+        with p5: s_qty = st.number_input("Qty", min_value=0, value=0)
+        with p6: s_deal = st.text_input("Deal", value="00")
+        with p7: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=0.0)
+        with p8: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
+        with p9: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+        with p10:
             if s_disc_pct > 0:
                 calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             else:
                 calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
             st.write(f"**Rate:** ₹{calc_rate}")
-        with p10:
-            st.write("")
             if st.button("➕ Add Item"):
                 amt = float(s_qty) * calc_rate
                 st.session_state["scanned_cart"].append({
@@ -641,7 +603,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
 # ==========================================
-# 2. SALES HISTORY
+# 2. SALES HISTORY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
@@ -649,6 +611,7 @@ elif active_tab == "📦 Sales History":
     df_sales = load_transaction_data("sales")
     
     if not df_sales.empty:
+        # Date Filter Row
         st.markdown("##### 📅 Date Range Filter")
         d_col1, d_col2 = st.columns(2)
         with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="sal_start")
@@ -707,7 +670,7 @@ elif active_tab == "📦 Sales History":
         st.info("No Sales records found in selected range.")
 
 # ==========================================
-# 3. PURCHASE HISTORY
+# 3. PURCHASE HISTORY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "📥 Purchase History (Stock In)":
     st.markdown("<h2 style='color: #E65100;'>📥 Supplier Purchase Register</h2>", unsafe_allow_html=True)
@@ -715,6 +678,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
     df_purchase = load_transaction_data("purchase")
     
     if not df_purchase.empty:
+        # Date Filter Row
         st.markdown("##### 📅 Date Range Filter")
         d_col1, d_col2 = st.columns(2)
         with d_col1: start_d = st.date_input("Start Date", value=date.today() - timedelta(days=30), key="pur_start")
@@ -773,7 +737,7 @@ elif active_tab == "📥 Purchase History (Stock In)":
         st.info("No Purchase records found in selected range.")
 
 # ==========================================
-# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY
+# 4. LIVE STOCK & QUANTITY-VALUE SUMMARY (WITH DATE RANGE FILTER)
 # ==========================================
 elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
     st.markdown("<h2 style='color: #E65100;'>🏭 Live Stock & Quantity-Value Summary</h2>", unsafe_allow_html=True)
@@ -812,13 +776,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 merged['Avg Purchase Rate'] = merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                 merged['Net Stock Value (₹)'] = merged['Net Stock Qty'] * merged['Avg Purchase Rate']
                 
-                tot_p_qty = merged['Purchase_Qty'].sum()
-                tot_p_val = merged['Purchase_Value'].sum()
-                tot_s_qty = merged['Sales_Qty'].sum()
-                tot_s_val = merged['Sales_Value'].sum()
-                tot_n_qty = merged['Net Stock Qty'].sum()
-                tot_n_val = merged['Net Stock Value (₹)'].sum()
-                
                 display_df = merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                 display_df.columns = ['Product', 'Total Purchase Qty', 'Total Purchase Value (₹)', 'Total Sales Qty', 'Total Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                 
@@ -827,13 +784,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                 display_df['Net Stock Value (₹)'] = display_df['Net Stock Value (₹)'].map('₹ {:,.2f}'.format)
                 
                 st.dataframe(display_df, use_container_width=True)
-                
-                st.markdown("---")
-                st.markdown("### 📊 Grand Total Summary")
-                t1, t2, t3 = st.columns(3)
-                t1.metric("📦 Total Purchase (Qty & Value)", f"{tot_p_qty:,.0f} Qty", f"₹ {tot_p_val:,.2f}")
-                t2.metric("🛍️ Total Sales (Qty & Value)", f"{tot_s_qty:,.0f} Qty", f"₹ {tot_s_val:,.2f}")
-                t3.metric("🏷️ Net Stock (Qty & Value)", f"{tot_n_qty:,.0f} Qty", f"₹ {tot_n_val:,.2f}")
             else:
                 st.info("No stock data available in selected date range.")
         
@@ -878,13 +828,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                     sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
                     sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
                     
-                    sr_tp_qty = sr_merged['Purchase_Qty'].sum()
-                    sr_tp_val = sr_merged['Purchase_Value'].sum()
-                    sr_ts_qty = sr_merged['Sales_Qty'].sum()
-                    sr_ts_val = sr_merged['Sales_Value'].sum()
-                    sr_tn_qty = sr_merged['Net Stock Qty'].sum()
-                    sr_tn_val = sr_merged['Net Stock Value (₹)'].sum()
-                    
                     sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
                     sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
                     
@@ -894,13 +837,6 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
                     
                     st.subheader(f"📋 Product Summary for {selected_sr}")
                     st.dataframe(sr_display, use_container_width=True)
-                    
-                    st.markdown("---")
-                    st.markdown(f"### 📊 Total Summary for {selected_sr}")
-                    t1, t2, t3 = st.columns(3)
-                    t1.metric("📦 Purchase (Qty & Value)", f"{sr_tp_qty:,.0f} Qty", f"₹ {sr_tp_val:,.2f}")
-                    t2.metric("🛍️ Sales (Qty & Value)", f"{sr_ts_qty:,.0f} Qty", f"₹ {sr_ts_val:,.2f}")
-                    t3.metric("🏷️ Net Stock (Qty & Value)", f"{sr_tn_qty:,.0f} Qty", f"₹ {sr_tn_val:,.2f}")
                 else:
                     st.info(f"No records found for Sales Executive '{selected_sr}' in selected range.")
             else:
@@ -928,24 +864,10 @@ elif active_tab == "🏭 Live Stock & Quantity-Value Summary":
             sr_merged['Avg Rate'] = sr_merged.apply(lambda r: (r['Purchase_Value'] / r['Purchase_Qty']) if r['Purchase_Qty'] > 0 else 0, axis=1)
             sr_merged['Net Stock Value (₹)'] = sr_merged['Net Stock Qty'] * sr_merged['Avg Rate']
             
-            sr_tp_qty = sr_merged['Purchase_Qty'].sum()
-            sr_tp_val = sr_merged['Purchase_Value'].sum()
-            sr_ts_qty = sr_merged['Sales_Qty'].sum()
-            sr_ts_val = sr_merged['Sales_Value'].sum()
-            sr_tn_qty = sr_merged['Net Stock Qty'].sum()
-            sr_tn_val = sr_merged['Net Stock Value (₹)'].sum()
-            
             sr_display = sr_merged[['product', 'Purchase_Qty', 'Purchase_Value', 'Sales_Qty', 'Sales_Value', 'Net Stock Qty', 'Net Stock Value (₹)']].copy()
             sr_display.columns = ['Product', 'Purchased Qty', 'Purchase Value (₹)', 'Sold Qty', 'Sales Value (₹)', 'Net Stock Qty', 'Net Stock Value (₹)']
             
             st.dataframe(sr_display, use_container_width=True)
-            
-            st.markdown("---")
-            st.markdown("### 📊 Your Total Summary")
-            t1, t2, t3 = st.columns(3)
-            t1.metric("📦 Purchase (Qty & Value)", f"{sr_tp_qty:,.0f} Qty", f"₹ {sr_tp_val:,.2f}")
-            t2.metric("🛍️ Sales (Qty & Value)", f"{sr_ts_qty:,.0f} Qty", f"₹ {sr_ts_val:,.2f}")
-            t3.metric("🏷️ Net Stock (Qty & Value)", f"{sr_tn_qty:,.0f} Qty", f"₹ {sr_tn_val:,.2f}")
         else:
             st.info("No Stock data available for your ID in selected range.")
 
