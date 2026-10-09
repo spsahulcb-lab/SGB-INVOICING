@@ -734,23 +734,23 @@ elif active_tab == "🤖 AI Smart Scan & Billing":
                 amt = float(s_qty) * calc_net_rate
 if rate_mode == "NET RATE Mode (0% GST)":
     with st.form("net_billing_form", clear_on_submit=False):
-    r1_c1, r1_c2, r1_c3 = st.columns(3)
-    with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
-    with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
-    with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
+        r1_c1, r1_c2, r1_c3 = st.columns(3)
+        with r1_c1: s_qty = st.number_input("Qty", min_value=1, value=1)
+        with r1_c2: m_pack = st.text_input("Pack", value=def_pack)
+        with r1_c3: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=selected_batch_info["mrp"] if selected_batch_info else def_mrp)
 
-    r2_c1, r2_c2 = st.columns(2)
-    with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
-    with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
-        
+        r2_c1, r2_c2 = st.columns(2)
+        with r2_c1: m_batch = st.text_input("Batch", value=selected_batch_info["batch"] if selected_batch_info else "00")
+        with r2_c2: m_exp = st.text_input("Expiry", value=selected_batch_info["expiry"] if selected_batch_info else "00")
+
         s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-        
+
         submitted_net = st.form_submit_button("➕ Add Net Item to Bill")
-        
-        if submitted_net and sel_prod != "00":
-            calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            amt = float(s_qty) * calc_net_rate
-            st.session_state["scanned_cart"].append({
+
+    if submitted_net and sel_prod != "00":
+        calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+        amt = float(s_qty) * calc_net_rate
+        st.session_state["scanned_cart"].append({
                 "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
                 "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
                 "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
