@@ -590,7 +590,6 @@ else:
             )
             
             st.session_state["scanned_cart"] = edited_df.to_dict('records')
-        
         o_col1, o_col2 = st.columns([2, 1])
         with o_col2:
             extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
