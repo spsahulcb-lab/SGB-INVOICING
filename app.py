@@ -528,7 +528,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 def_mrp = 0.0
                 def_tax = 5.0
                 if sel_prod != "00" and not MASTER_DF.empty:
-                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
+                    m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
                 if not m_match.empty:
                     def_pack = str(m_match["pack"].values[0])
                     def_mrp = float(m_match["mrp"].values[0])
