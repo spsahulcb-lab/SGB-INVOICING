@@ -611,8 +611,7 @@ st.markdown(f"""
     </div>
 """, unsafe_allow_html=True)
 st.markdown("<br>", unsafe_allow_html=True)
-        
-        save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
+save_col1, save_col2, save_col3, save_col4, save_col5 = st.columns(5)
         
         with save_col1:
             if st.button("📤 Save SALES"):
