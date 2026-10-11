@@ -1153,8 +1153,7 @@ def sync_entire_master_products(df_input):
 
     conn.commit()
     conn.close()
-
-    # Push to Supabase Cloud Database
+# Push to Supabase Cloud Database
     if supabase and records_supabase:
         try:
             supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
@@ -1163,6 +1162,3 @@ def sync_entire_master_products(df_input):
             st.error(f"Supabase Cloud Save Error: {e}")
     else:
         st.success(f"✅ Master List saved locally ({len(records_supabase)} Products)!")
-                delete_master_product(del_p)
-                st.success(f"Product '{del_p}' permanently deleted from database.")
-                st.rerun()
