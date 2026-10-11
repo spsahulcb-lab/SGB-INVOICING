@@ -643,7 +643,7 @@ with save_col5:
 # ==========================================
 # 2. SALES HISTORY
 # ==========================================
-elif active_tab == "📦 Sales History":
+if active_tab == "📦 Sales History":
     st.markdown("<h2 style='color: #E65100;'>📦 Wholesale Sales Register</h2>", unsafe_allow_html=True)
     
     df_sales = load_transaction_data("sales")
