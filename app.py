@@ -509,24 +509,22 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             with p4: m_exp = st.text_input("Expiry", value=def_exp)
             with p5: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
             with p6: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
-            
-            submitted_net = st.form_submit_button("➕ Add Net Item")
-    if submitted_net:
-            calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            amt = float(s_qty) * calc_net_rate
-            st.session_state["scanned_cart"].append({
-                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-            })
-            st.rerun()
+                
+          submitted_net = st.form_submit_button("+ Add Net Item")
+if submitted_net:
+    calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+    amt = float(s_qty) * calc_net_rate
+    st.session_state["scanned_cart"].append({
+        "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+        "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
+        "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+        "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
+    })
+    st.rerun()
 
-    else:
-        with st.form("gross_billing_form"):
-            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
-            
-            def_pack = "00"
+else:
+    with st.form("gross_billing_form"):
+        sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
             def_mrp = 0.0
             def_tax = 5.0
             if sel_prod != "00" and not MASTER_DF.empty:
