@@ -1031,11 +1031,58 @@ elif active_tab == "🏷️ Manage Master Products":
             key="master_data_editor"
         )
 
+        # DIRECT SAVE LOGIC INSIDE BUTTON
         if st.button("💾 Save All Products to Master Database", type="primary", use_container_width=True):
             df_to_save = edited_master_df if edited_master_df is not None else st.session_state["temp_master_upload"]
             
-            # Simple & Original Direct Bulk Insert / Sync Logic
-            sync_entire_master_products(df_to_save)
+            saved_count = 0
+            conn = sqlite3.connect(DB_FILE)
+            c = conn.cursor()
+            c.execute("DELETE FROM master_products")
+            
+            records_supabase = []
+
+            for _, r in df_to_save.iterrows():
+                row_dict = {str(k).strip().lower(): v for k, v in r.items()}
+                
+                p_name = ""
+                for k in ["product", "product_name", "product name", "item", "item_name"]:
+                    if k in row_dict and pd.notna(row_dict[k]):
+                        p_name = str(row_dict[k]).strip()
+                        break
+
+                if p_name and p_name.lower() not in ["nan", "none", "product", "product name", ""]:
+                    pack = str(row_dict.get("pack", row_dict.get("packing", "00"))).strip()
+                    mrp = clean_float(row_dict.get("mrp", row_dict.get("m.r.p.", 0.0)))
+                    tax = clean_float(str(row_dict.get("tax", row_dict.get("gst", "5.0"))).replace("%", "").replace("GST", ""))
+                    rate = clean_float(row_dict.get("rate", row_dict.get("net rate", 0.0)))
+
+                    # 1. Local SQLite me save karein
+                    c.execute(
+                        "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+                        (p_name, pack, mrp, rate, tax)
+                    )
+                    
+                    records_supabase.append({
+                        "product_name": p_name,
+                        "pack": pack,
+                        "mrp": mrp,
+                        "rate": rate,
+                        "tax": tax
+                    })
+                    saved_count += 1
+
+            conn.commit()
+            conn.close()
+
+            # 2. Supabase Cloud Database me push karein
+            if supabase and records_supabase:
+                try:
+                    supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
+                except Exception as e:
+                    st.error(f"Supabase Error: {e}")
+
+            st.success(f"✅ Successfully Saved {saved_count} Products!")
             if "temp_master_upload" in st.session_state:
                 del st.session_state["temp_master_upload"]
             st.rerun()
@@ -1067,99 +1114,3 @@ elif active_tab == "🏷️ Manage Master Products":
             st.dataframe(existing_df, use_container_width=True)
         else:
             st.info("Master database abhi khali hai.")
-
-# ==========================================
-# ORIGINAL & RELIABLE HELPER FUNCTIONS
-# ==========================================
-def load_master_products():
-    if supabase:
-        try:
-            res = supabase.table("products").select("*").execute()
-            if res.data:
-                return pd.DataFrame(res.data)
-        except Exception:
-            pass
-
-    conn = sqlite3.connect(DB_FILE)
-    df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
-    conn.close()
-    return df
-
-
-def add_master_product(product_name, pack, mrp, rate, tax):
-    p_clean = product_name.strip()
-    if not p_clean:
-        return
-    if supabase:
-        try:
-            supabase.table("products").upsert({
-                "product_name": p_clean,
-                "pack": str(pack),
-                "mrp": clean_float(mrp),
-                "rate": clean_float(rate),
-                "tax": tax
-            }, on_conflict="product_name").execute()
-        except Exception as e:
-            st.error(f"Supabase Add Error: {e}")
-
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute(
-        "INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
-        (p_clean, str(pack), clean_float(mrp), clean_float(rate), clean_float(tax))
-    )
-    conn.commit()
-    conn.close()
-
-
-def sync_entire_master_products(df_input):
-    records_supabase = []
-    
-    # 1. Local SQLite mein save karein
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute("DELETE FROM master_products")
-
-    for _, r in df_input.iterrows():
-        row_dict = {str(k).strip().lower(): v for k, v in r.items()}
-        
-        p_name = ""
-        for k in ["product", "product_name", "product name", "item", "item_name"]:
-            if k in row_dict and pd.notna(row_dict[k]):
-                p_name = str(row_dict[k]).strip()
-                break
-
-        if p_name and p_name.lower() not in ["nan", "none", "product", "product name", ""]:
-            pack = str(row_dict.get("pack", row_dict.get("packing", "00"))).strip()
-            mrp = clean_float(row_dict.get("mrp", row_dict.get("m.r.p.", 0.0)))
-            tax = clean_float(str(row_dict.get("tax", row_dict.get("gst", "5.0"))).replace("%", "").replace("GST", ""))
-            rate = clean_float(row_dict.get("rate", row_dict.get("net rate", 0.0)))
-
-            # SQLite insert
-            c.execute(
-                "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
-                (p_name, pack, mrp, rate, tax)
-            )
-            
-            # Supabase record dictionary
-            records_supabase.append({
-                "product_name": p_name,
-                "pack": pack,
-                "mrp": mrp,
-                "rate": rate,
-                "tax": tax
-            })
-
-    conn.commit()
-    conn.close()
-
-    # 2. Supabase Cloud Database mein push karein
-    if supabase and records_supabase:
-        try:
-            # Ek ek karke upsert karein taaki exact error pata chal sake
-            response = supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
-            st.success(f"✅ Success! {len(records_supabase)} products saved to Supabase & Local DB.")
-        except Exception as e:
-            st.error(f"❌ Supabase Save Failed: {e}")
-    else:
-        st.success(f"✅ Master List saved locally ({len(records_supabase)} Products)!")
