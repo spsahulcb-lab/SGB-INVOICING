@@ -561,23 +561,21 @@ else:
                 with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
                 
                 submitted_gross = st.form_submit_button("➕ Add Gross Item")
-           submitted_gross = st.form_submit_button("+ Add Gross Item")
 
-if submitted_gross:
-    if s_disc_pct > 0:
-        calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-    else:
-        calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-    amt = float(s_qty) * calc_rate
-    st.session_state["scanned_cart"].append({
-        "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-        "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
-        "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-        "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
-    })
-    st.rerun()
-
-if st.session_state["scanned_cart"]:
+        if submitted_gross:
+            if s_disc_pct > 0:
+                calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
+            else:
+                calc_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
+            amt = float(s_qty) * calc_rate
+            st.session_state["scanned_cart"].append({
+                "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+                "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
+                "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
+            })
+            st.rerun()
+            if st.session_state["scanned_cart"]:
     st.markdown("---")
     st.subheader("🛒 Current Bill Items")
     
