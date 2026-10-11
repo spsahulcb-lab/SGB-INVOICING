@@ -511,7 +511,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             with p6: s_disc_pct = st.number_input("Discount %", min_value=0.0, max_value=100.0, value=0.0)
             
             submitted_net = st.form_submit_button("➕ Add Net Item")
-          if submitted_net:
+    if submitted_net:
             calc_net_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             amt = float(s_qty) * calc_net_rate
             st.session_state["scanned_cart"].append({
