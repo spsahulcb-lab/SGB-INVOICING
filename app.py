@@ -524,15 +524,19 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             
             
             
-            
             else:
-            with st.form("gross_billing_form"):
-                sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
-                
-                def_pack = "00"
-                def_mrp = 0.0
-                def_tax = 5.0
-                if sel_prod != "00" and not MASTER_DF.empty:
+        with st.form("gross_billing_form"):
+            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
+            
+            def_pack = "00"
+            def_mrp = 0.0
+            def_tax = 5.0
+            if sel_prod != "00" and not MASTER_DF.empty:
+                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
+                if not m_match.empty:
+                    def_pack = str(m_match["pack"].values[0])
+                    def_mrp = float(m_match["mrp"].values[0])
+                    def_tax = float(m_match["tax"].values[0]) if "tax" in m_match.columns else 5.0
                     m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
                     if not m_match.empty:
                         def_pack = str(m_match["pack"].values[0])
