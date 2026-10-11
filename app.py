@@ -576,21 +576,32 @@ else:
             })
             st.rerun()
             if st.session_state["scanned_cart"]:
-            st.markdown("---")
-            st.subheader("🛒 Current Bill Items")
-            
-            cart_df = pd.DataFrame(st.session_state["scanned_cart"])
-            
-            edited_df = st.data_editor(
-                cart_df,
-                key="cart_editor",
-                num_rows="dynamic",
-                disabled=["AMOUNT"],
-                use_container_width=True
-            )
-            
-            st.session_state["scanned_cart"] = edited_df.to_dict('records')
-        o_col1, o_col2 = st.columns([2, 1])
+    st.markdown("---")
+    st.subheader("🛒 Current Bill Items")
+    
+    cart_df = pd.DataFrame(st.session_state["scanned_cart"])
+    
+    edited_df = st.data_editor(
+        cart_df,
+        key="cart_editor",
+        num_rows="dynamic",
+        disabled=["AMOUNT"],
+        use_container_width=True
+    )
+    
+    st.session_state["scanned_cart"] = edited_df.to_dict('records')
+
+o_col1, o_col2 = st.columns([2, 1])
+with o_col2:
+    extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
+
+if not edited_df.empty:
+    sub_total = float(edited_df["AMOUNT"].sum())
+    total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
+    gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
+    net_val = (sub_total - extra_bill_disc) + gst_val
+else:
+    sub_total = total_mrp_sum = gst_val = net_val = 0.0
         with o_col2:
             extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
         
