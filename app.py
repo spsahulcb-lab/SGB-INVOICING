@@ -602,16 +602,7 @@ if not edited_df.empty:
     net_val = (sub_total - extra_bill_disc) + gst_val
 else:
     sub_total = total_mrp_sum = gst_val = net_val = 0.0
-        with o_col2:
-            extra_bill_disc = st.number_input("🎁 Extra Overall Bill Discount (₹)", min_value=0.0, value=0.0)
         
-        if not edited_df.empty:
-            sub_total = float(edited_df["AMOUNT"].sum())
-            total_mrp_sum = float((edited_df["MRP"] * edited_df["QTY"]).sum())
-            gst_val = sum([row["AMOUNT"] * (row["GST"] / 100.0) for _, row in edited_df.iterrows()])
-            net_val = (sub_total - extra_bill_disc) + gst_val
-        else:
-            sub_total = total_mrp_sum = gst_val = net_val = 0.0
         
         st.markdown(f"""
             <div style='background-color:#FFF3E0; padding:15px; border-radius:10px; border-left:5px solid #EF6C00;'>
