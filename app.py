@@ -1115,13 +1115,12 @@ def add_master_product(product_name, pack, mrp, rate, tax):
 def sync_entire_master_products(df_input):
     records_supabase = []
     
-    # SQLite Clean Reset
+    # 1. Local SQLite mein save karein
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
     c.execute("DELETE FROM master_products")
 
     for _, r in df_input.iterrows():
-        # Universal Column Value Extraction
         row_dict = {str(k).strip().lower(): v for k, v in r.items()}
         
         p_name = ""
@@ -1136,13 +1135,13 @@ def sync_entire_master_products(df_input):
             tax = clean_float(str(row_dict.get("tax", row_dict.get("gst", "5.0"))).replace("%", "").replace("GST", ""))
             rate = clean_float(row_dict.get("rate", row_dict.get("net rate", 0.0)))
 
-            # Save to Local SQLite
+            # SQLite insert
             c.execute(
                 "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
                 (p_name, pack, mrp, rate, tax)
             )
             
-            # Prepare for Cloud Supabase
+            # Supabase record dictionary
             records_supabase.append({
                 "product_name": p_name,
                 "pack": pack,
@@ -1153,12 +1152,14 @@ def sync_entire_master_products(df_input):
 
     conn.commit()
     conn.close()
-# Push to Supabase Cloud Database
+
+    # 2. Supabase Cloud Database mein push karein
     if supabase and records_supabase:
         try:
-            supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
-            st.success(f"✅ Master List successfully saved/updated ({len(records_supabase)} Products)!")
+            # Ek ek karke upsert karein taaki exact error pata chal sake
+            response = supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
+            st.success(f"✅ Success! {len(records_supabase)} products saved to Supabase & Local DB.")
         except Exception as e:
-            st.error(f"Supabase Cloud Save Error: {e}")
+            st.error(f"❌ Supabase Save Failed: {e}")
     else:
         st.success(f"✅ Master List saved locally ({len(records_supabase)} Products)!")
