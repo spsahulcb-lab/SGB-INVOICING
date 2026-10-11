@@ -520,14 +520,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                         "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
                         "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                     })
-                    st.rerun()
-    amt = float(s_qty) * calc_net_rate
-    st.session_state["scanned_cart"].append({
-        "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-        "QTY": float(s_qty), "DEAL/FREE": "00", "MRP": float(s_mrp),
-        "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-        "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
-    })
     st.rerun()
 
 else:
