@@ -618,28 +618,24 @@ with save_col1:
                 st.success("✅ Saved to Sales Database!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
-
-        with save_col2:
+with save_col2:
             if st.button("📥 Save PURCHASE"):
                 save_transaction_data("purchase", st.session_state["scanned_cart"], inv_no, party_name, st.session_state["username"])
                 st.success("✅ Saved to Purchase Database!")
                 st.session_state["scanned_cart"] = []
                 st.rerun()
-
-        with save_col3:
+with save_col3:
             try:
                 pdf_bytes = generate_pdf_invoice(party_name, inv_no, gst_no, st.session_state["scanned_cart"], total_mrp_sum, extra_bill_disc, sub_total, gst_val, net_val)
                 st.download_button(label="📄 Download PDF", data=pdf_bytes, file_name=f"{inv_no}.pdf", mime="application/pdf")
             except Exception as pdf_err: st.error(f"PDF Error: {pdf_err}")
-
-        with save_col4:
+with save_col4:
             msg = f"🧾 *INVOICE*\n*Party:* {party_name}\n*Total:* ₹{net_val:,.2f}\n"
             for row in st.session_state["scanned_cart"]:
                 msg += f"• {row['PRODUCT']} (B:{row.get('BATCH','00')}) - {row['QTY']} Qty @ ₹{row['RATE']}\n"
             wa_url = f"[https://api.whatsapp.com/send?text=](https://api.whatsapp.com/send?text=){urllib.parse.quote(msg)}"
             st.markdown(f'<a href="{wa_url}" target="_blank"><button style="background-color:#25D366; color:white; font-weight:bold; height:38px; border-radius:8px; border:none; width:100%;">📲 WhatsApp</button></a>', unsafe_allow_html=True)
-
-        with save_col5:
+with save_col5:
             if st.button("🗑️ Clear Entire List"):
                 st.session_state["scanned_cart"] = []
                 st.rerun()
