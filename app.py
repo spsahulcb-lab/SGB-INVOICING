@@ -521,31 +521,33 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
-    else:
-        with st.form("gross_billing_form"):
-            sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
-            
-            def_pack = "00"
-            def_mrp = 0.0
-            if sel_prod != "00" and not MASTER_DF.empty:
-                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
-                if not m_match.empty:
-                    def_pack = str(m_match["pack"].values[0])
-                    def_mrp = float(m_match["mrp"].values[0])
-            
-            def_batch, def_exp = get_latest_batch_expiry(sel_prod)
-
-            p1, p2, p3, p4, p5, p6, p7, p8 = st.columns(8)
-            with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
-            with p2: m_pack = st.text_input("Pack", value=def_pack)
-            with p3: m_batch = st.text_input("Batch", value=def_batch)
-            with p4: m_exp = st.text_input("Expiry", value=def_exp)
-            with p5: s_deal = st.text_input("Deal", value="00")
-            with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
-            with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=5.0, step=1.0)
-            with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
-            
-            submitted_gross = st.form_submit_button("➕ Add Gross Item")
+  else:
+            with st.form("gross_billing_form"):
+                sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
+                
+                def_pack = "00"
+                def_mrp = 0.0
+                def_tax = 5.0
+                if sel_prod != "00" and not MASTER_DF.empty:
+                    m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
+                    if not m_match.empty:
+                        def_pack = str(m_match["pack"].values[0])
+                        def_mrp = float(m_match["mrp"].values[0])
+                        def_tax = float(m_match["tax"].values[0]) if "tax" in m_match.columns else 5.0
+                
+                def_batch, def_exp = get_latest_batch_expiry(sel_prod)
+                
+                p1, p2, p3, p4, p5, p6, p7, p8 = st.columns(8)
+                with p1: s_qty = st.number_input("Qty", min_value=0, value=0)
+                with p2: m_pack = st.text_input("Pack", value=def_pack)
+                with p3: m_batch = st.text_input("Batch", value=def_batch)
+                with p4: m_exp = st.text_input("Expiry", value=def_exp)
+                with p5: s_deal = st.text_input("Deal", value="00")
+                with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp)
+                with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=def_tax, step=1.0)
+                with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0)
+                
+                submitted_gross = st.form_submit_button("➕ Add Gross Item")
             if submitted_gross:
                 if s_disc_pct > 0:
                     calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
