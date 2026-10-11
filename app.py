@@ -973,6 +973,74 @@ elif active_tab == "👥 User Management (Admin)":
 # ==========================================
 elif active_tab == "🏷️ Manage Master Products":
     st.markdown("<h2 style='color: #E65100;'>🏷️ Manage Master Products List</h2>", unsafe_allow_html=True)
+    st.markdown("### 📦 Bulk Product & Master List Manager (AI Scan & Excel)")
+    
+    upload_option = st.radio("Upload Method Select Karein:", ["🤖 AI Document Scanner (Photo/PDF)", "📊 Excel / CSV File Upload"], horizontal=True)
+
+    if upload_option == "🤖 AI Document Scanner (Photo/PDF)":
+        st.info("💡 Invoice, Rate List ya Product List ki photo/PDF upload karein. Gemini AI automatic details padh kar Master List bana dega.")
+        ai_file = st.file_uploader("Upload Product List Image or PDF", type=["jpg", "png", "jpeg", "pdf"], key="master_ai_uploader")
+
+        if st.button("🪄 Auto-Scan & Extract via AI", key="master_ai_btn"):
+            if ai_file:
+                with st.spinner("Scanning Document with Gemini AI..."):
+                    extracted_df = extract_master_products_with_ai(ai_file)
+                    if not extracted_df.empty:
+                        st.session_state["temp_master_upload"] = extracted_df
+                        st.success(f"✅ Gemini AI ne {len(extracted_df)} products successfully identify kar liye hain!")
+                    else:
+                        st.error("❌ Document se products scan nahi ho paye.")
+            else:
+                st.warning("Kripya pehle photo ya PDF select karein.")
+
+    else:
+        st.info("💡 Direct Excel (.xlsx) ya CSV file upload karke Master List update karein.")
+        excel_file = st.file_uploader("Upload Excel / CSV File", type=["csv", "xlsx", "xls"], key="master_excel_uploader")
+
+        if excel_file:
+            try:
+                if excel_file.name.endswith(".csv"):
+                    df_up = pd.read_csv(excel_file)
+                else:
+                    df_up = pd.read_excel(excel_file)
+                
+                # Auto-detect header row if extra header rows exist
+                if any("unnamed" in str(col).lower() for col in df_up.columns):
+                    for idx in range(min(5, len(df_up))):
+                        row_vals = [str(x).strip().lower() for x in df_up.iloc[idx].values]
+                        if any("product" in v for v in row_vals):
+                            df_up.columns = [str(x).strip() for x in df_up.iloc[idx].values]
+                            df_up = df_up.iloc[idx+1:].reset_index(drop=True)
+                            break
+
+                df_up.columns = [str(c).strip().title() for c in df_up.columns]
+                st.session_state["temp_master_upload"] = df_up
+                st.success(f"✅ Excel file se {len(df_up)} rows load ho gayi hain.")
+            except Exception as e:
+                st.error(f"❌ File read karne mein error: {e}")
+
+    # PREVIEW & SAVE SECTION
+    if "temp_master_upload" in st.session_state and not st.session_state["temp_master_upload"].empty:
+        st.markdown("---")
+        st.subheader("📋 Extracted Data Preview (Editable)")
+        
+        edited_master_df = st.data_editor(
+            st.session_state["temp_master_upload"],
+            num_rows="dynamic",
+            use_container_width=True,
+            key="master_data_editor"
+        )
+
+        if st.button("💾 Save All Products to Master Database", type="primary", use_container_width=True):
+            df_to_save = edited_master_df if edited_master_df is not None else st.session_state["temp_master_upload"]
+            
+            # Simple & Original Direct Bulk Insert / Sync Logic
+            sync_entire_master_products(df_to_save)
+            if "temp_master_upload" in st.session_state:
+                del st.session_state["temp_master_upload"]
+            st.rerun()
+
+    st.markdown("---")
     
     m_col1, m_col2 = st.columns([1, 1])
     
@@ -993,30 +1061,108 @@ elif active_tab == "🏷️ Manage Master Products":
                 st.rerun()
 
     with m_col2:
-        st.markdown("### 📋 Editable Master Products Database")
-        st.info("💡 **Tips:** Edit any cell and click 'Save Database Changes' to update.")
+        st.markdown("### 📋 Current Master Products Database")
+        existing_df = load_master_products()
+        if not existing_df.empty:
+            st.dataframe(existing_df, use_container_width=True)
+        else:
+            st.info("Master database abhi khali hai.")
+
+# ==========================================
+# ORIGINAL & RELIABLE HELPER FUNCTIONS
+# ==========================================
+def load_master_products():
+    if supabase:
+        try:
+            res = supabase.table("products").select("*").execute()
+            if res.data:
+                return pd.DataFrame(res.data)
+        except Exception:
+            pass
+
+    conn = sqlite3.connect(DB_FILE)
+    df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
+    conn.close()
+    return df
+
+
+def add_master_product(product_name, pack, mrp, rate, tax):
+    p_clean = product_name.strip()
+    if not p_clean:
+        return
+    if supabase:
+        try:
+            supabase.table("products").upsert({
+                "product_name": p_clean,
+                "pack": str(pack),
+                "mrp": clean_float(mrp),
+                "rate": clean_float(rate),
+                "tax": tax
+            }, on_conflict="product_name").execute()
+        except Exception as e:
+            st.error(f"Supabase Add Error: {e}")
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute(
+        "INSERT OR REPLACE INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+        (p_clean, str(pack), clean_float(mrp), clean_float(rate), clean_float(tax))
+    )
+    conn.commit()
+    conn.close()
+
+
+def sync_entire_master_products(df_input):
+    records_supabase = []
+    
+    # SQLite Clean Reset
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("DELETE FROM master_products")
+
+    for _, r in df_input.iterrows():
+        # Universal Column Value Extraction
+        row_dict = {str(k).strip().lower(): v for k, v in r.items()}
         
-        m_df = load_master_products()
-        display_df = m_df[["product_name", "pack", "mrp", "rate", "tax"]] if not m_df.empty else pd.DataFrame(columns=["product_name", "pack", "mrp", "rate", "tax"])
-        
-        edited_master_df = st.data_editor(
-            display_df,
-            key="master_db_editor",
-            num_rows="dynamic",
-            use_container_width=True
-        )
-        
-        if st.button("💾 Save Database Changes"):
-            sync_entire_master_products(edited_master_df)
-            st.success("✅ Master Database successfully updated!")
-            st.rerun()
+        p_name = ""
+        for k in ["product", "product_name", "product name", "item", "item_name"]:
+            if k in row_dict and pd.notna(row_dict[k]):
+                p_name = str(row_dict[k]).strip()
+                break
+
+        if p_name and p_name.lower() not in ["nan", "none", "product", "product name", ""]:
+            pack = str(row_dict.get("pack", row_dict.get("packing", "00"))).strip()
+            mrp = clean_float(row_dict.get("mrp", row_dict.get("m.r.p.", 0.0)))
+            tax = clean_float(str(row_dict.get("tax", row_dict.get("gst", "5.0"))).replace("%", "").replace("GST", ""))
+            rate = clean_float(row_dict.get("rate", row_dict.get("net rate", 0.0)))
+
+            # Save to Local SQLite
+            c.execute(
+                "INSERT INTO master_products (product_name, pack, mrp, rate, tax) VALUES (?, ?, ?, ?, ?)",
+                (p_name, pack, mrp, rate, tax)
+            )
             
-        st.markdown("---")
-        st.markdown("##### 🗑️ Remove Product via Selectbox")
-        p_del_list = m_df["product_name"].tolist() if not m_df.empty else ["None"]
-        del_p = st.selectbox("Select Product to Delete", p_del_list)
-        if st.button("❌ Delete Product"):
-            if del_p != "None":
+            # Prepare for Cloud Supabase
+            records_supabase.append({
+                "product_name": p_name,
+                "pack": pack,
+                "mrp": mrp,
+                "rate": rate,
+                "tax": tax
+            })
+
+    conn.commit()
+    conn.close()
+
+    # Push to Supabase Cloud Database
+    if supabase and records_supabase:
+        try:
+            supabase.table("products").upsert(records_supabase, on_conflict="product_name").execute()
+            st.success(f"✅ Master List successfully saved/updated ({len(records_supabase)} Products)!")
+        except Exception as e:
+            st.error(f"Supabase Cloud Save Error: {e}")
+    else:
+        st.success(f"✅ Master List saved locally ({len(records_supabase)} Products)!")
                 delete_master_product(del_p)
                 st.success(f"Product '{del_p}' permanently deleted from database.")
                 st.rerun()
