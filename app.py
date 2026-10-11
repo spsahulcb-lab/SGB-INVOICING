@@ -521,7 +521,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                         "RATE": calc_net_rate, "GST": 0.0, "AMOUNT": round(amt, 2)
                     })
     st.rerun()
-                with st.form("gross_billing_form"):
+    with st.form("gross_billing_form"):
                 sel_prod = st.selectbox("Product", MASTER_LIST, index=0)
             
                 def_pack = "00"
