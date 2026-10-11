@@ -552,7 +552,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 
                 submitted_gross = st.form_submit_button("➕ Add Gross Item")
 
-        if submitted_gross:
+    if submitted_gross:
             if s_disc_pct > 0:
                 calc_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             else:
