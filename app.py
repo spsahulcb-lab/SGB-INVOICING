@@ -578,17 +578,17 @@ else:
             if st.session_state["scanned_cart"]:
                 st.markdown("---")
                 st.subheader("🛒 Current Bill Items")
-    
+                
                 cart_df = pd.DataFrame(st.session_state["scanned_cart"])
-    
+            
                 edited_df = st.data_editor(
                 cart_df,
-                key="cart_editor"
+                key="cart_editor",
                 num_rows="dynamic",
                 disabled=["AMOUNT"],
                 use_container_width=True
                 )
-    
+            
                 st.session_state["scanned_cart"] = edited_df.to_dict('records')
 
 o_col1, o_col2 = st.columns([2, 1])
