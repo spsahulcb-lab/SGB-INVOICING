@@ -48,12 +48,13 @@ def init_local_db():
     for tbl in ["sales", "purchase"]:
         for col, dtype in [("sr_username", "TEXT"), ("batch", "TEXT"), ("expiry", "TEXT"), ("pack", "TEXT"), ("free_qty", "TEXT"), ("disc_pct", "REAL"), ("disc_rs", "REAL")]:
             try: c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} {dtype}")
-            except Exception: pass
+            except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     for col, dtype in [("pack", "TEXT"), ("mrp", "REAL"), ("rate", "REAL"), ("tax", "REAL")]:
         try: c.execute(f"ALTER TABLE master_products ADD COLUMN {col} {dtype}")
-        except Exception: pass
-    
+        except Exception as e:
+        st.error(f"Supabase Error Details: {e}")
     c.execute("INSERT OR IGNORE INTO users VALUES ('manager', 'admin123', 'Manager', 'Manager')")
     c.execute("INSERT OR IGNORE INTO users VALUES ('satya', 'satya123', 'Satya Sahu', 'Sales Executive')")
     
@@ -80,7 +81,8 @@ def load_master_products():
         try:
             res = supabase.table("master_products").select("*").execute()
             if res.data: return pd.DataFrame(res.data)
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     df = pd.read_sql_query("SELECT * FROM master_products ORDER BY product_name ASC", conn)
@@ -92,7 +94,8 @@ def add_master_product(product_name, pack, mrp, rate, tax):
     if not p_clean: return
     if supabase:
         try: supabase.table("master_products").insert({"product_name": p_clean, "pack": pack, "mrp": mrp, "rate": rate, "tax": tax}).execute()
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -103,7 +106,8 @@ def add_master_product(product_name, pack, mrp, rate, tax):
 def delete_master_product(product_name):
     if supabase:
         try: supabase.table("master_products").delete().eq("product_name", product_name).execute()
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -137,8 +141,8 @@ def sync_entire_master_products(edited_df):
             supabase.table("master_products").delete().neq("id", -1).execute()
             if records:
                 supabase.table("master_products").insert(records).execute()
-        except Exception: pass
-
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
 def auto_correct_brand(scanned_name, master_list):
     if not scanned_name or str(scanned_name).strip() == "":
         return "Unknown Item"
@@ -170,7 +174,8 @@ def save_transaction_data(table_name, items, invoice, party, sr_username):
     
     if supabase:
         try: supabase.table(table_name).insert(records).execute()
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
     
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -198,7 +203,8 @@ def load_all_users():
         try:
             res = supabase.table("users").select("*").execute()
             if res.data: return {row["username"]: {"password": row["password"], "name": row["name"], "role": row["role"]} for row in res.data}
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -210,7 +216,8 @@ def load_all_users():
 def save_new_user(username, password, name, role):
     if supabase:
         try: supabase.table("users").insert({"username": username, "password": password, "name": name, "role": role}).execute()
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -221,7 +228,8 @@ def save_new_user(username, password, name, role):
 def delete_user_db(username):
     if supabase:
         try: supabase.table("users").delete().eq("username", username).execute()
-        except Exception: pass
+        except Exception as e:
+            st.error(f"Supabase Error Details: {e}")
             
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
