@@ -545,48 +545,48 @@ if active_tab == "🤖 AI Smart Scan & Billing":
     
     else:
         with st.form("unique_gross_billing_form"):
-            sel_prod_g = st.selectbox("Product (GROSS RATE)", MASTER_LIST, index=0, key="unique_sel_prod_gross")
+            sel_prod = st.selectbox("Product (GROSS RATE)", MASTER_LIST, index=0, key="unique_sel_prod_gross")
             
-            def_pack_g = "00"
-            def_mrp_g = 0.0
-            def_tax_g = 5.0
-            def_rate_g = 0.0
+            def_pack = "00"
+            def_mrp = 0.0
+            def_tax = 5.0
+            def_rate = 0.0
             
-            if sel_prod_g != "00" and not MASTER_DF.empty:
+            if sel_prod != "00" and not MASTER_DF.empty:
                 for idx, row in MASTER_DF.iterrows():
                     p_val = str(row.get("product_name", row.get("PRODUCT_NAME", row.get("Product", "")))).strip()
-                    if p_val.upper() == str(sel_prod_g).strip().upper():
-                        def_pack_g = str(row.get("pack", row.get("PACK", "00")))
+                    if p_val.upper() == str(sel_prod).strip().upper():
+                        def_pack = str(row.get("pack", row.get("PACK", "00")))
                         mrp_val = row.get("mrp", row.get("MRP", 0.0))
-                        def_mrp_g = float(mrp_val) if pd.notna(mrp_val) else 0.0
+                        def_mrp = float(mrp_val) if pd.notna(mrp_val) else 0.0
                         
                         tax_val = row.get("tax", row.get("TAX", 5.0))
-                        def_tax_g = float(tax_val) if pd.notna(tax_val) else 5.0
+                        def_tax = float(tax_val) if pd.notna(tax_val) else 5.0
                         
                         rate_val = row.get("rate", row.get("RATE", 0.0))
                         if pd.notna(rate_val) and float(rate_val) > 0:
-                            def_rate_g = float(rate_val)
+                            def_rate = float(rate_val)
                         else:
-                            def_rate_g = round((def_mrp_g * 80.0) / (100.0 + def_tax_g), 2)
+                            def_rate = round((def_mrp * 80.0) / (100.0 + def_tax), 2)
                         break
             
-            def_batch_g, def_exp_g = get_latest_batch_expiry(sel_prod_g)
+            def_batch, def_exp = get_latest_batch_expiry(sel_prod)
             
             col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns(9)
             with col1: g_qty_val = st.number_input("Qty", min_value=0, value=0, key="u_g_qty")
-            with col2: g_pack_val = st.text_input("Pack", value=def_pack_g, key="u_g_pack")
-            with col3: g_batch_val = st.text_input("Batch", value=def_batch_g, key="u_g_batch")
-            with col4: g_exp_val = st.text_input("Expiry", value=def_exp_g, key="u_g_exp")
+            with col2: g_pack_val = st.text_input("Pack", value=def_pack, key="u_g_pack")
+            with col3: g_batch_val = st.text_input("Batch", value=def_batch, key="u_g_batch")
+            with col4: g_exp_val = st.text_input("Expiry", value=def_exp, key="u_g_exp")
             with col5: g_deal_val = st.text_input("Deal", value="00", key="u_g_deal")
-            with col6: g_mrp_val = st.number_input("MRP (₹)", min_value=0.0, value=float(def_mrp_g), key="u_g_mrp")
-            with col7: g_gst_val = st.number_input("GST (%)", min_value=0.0, value=float(def_tax_g), step=1.0, key="u_g_gst")
+            with col6: g_mrp_val = st.number_input("MRP (₹)", min_value=0.0, value=float(def_mrp), key="u_g_mrp")
+            with col7: g_gst_val = st.number_input("GST (%)", min_value=0.0, value=float(def_tax), step=1.0, key="u_g_gst")
             with col8: g_disc_val = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0, key="u_g_disc")
             
             if g_disc_val > 0:
                 calc_preview_rate = round(g_mrp_val * (1 - (g_disc_val / 100.0)), 2)
             else:
-                if def_rate_g > 0:
-                    calc_preview_rate = def_rate_g
+                if def_rate > 0:
+                    calc_preview_rate = def_rate
                 else:
                     calc_preview_rate = round((g_mrp_val * 80.0) / (100.0 + g_gst_val), 2)
                 
@@ -597,7 +597,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             if submitted_gross_btn:
                 item_amt = float(g_qty_val) * g_rate_val
                 st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod_g, "PACK": g_pack_val, "BATCH": g_batch_val, "EXPIRY": g_exp_val,
+                    "PRODUCT": sel_prod, "PACK": g_pack_val, "BATCH": g_batch_val, "EXPIRY": g_exp_val,
                     "QTY": float(g_qty_val), "DEAL/FREE": g_deal_val, "MRP": float(g_mrp_val),
                     "DISC (%)": float(g_disc_val), "DISC (₹)": 0.0,
                     "RATE": g_rate_val, "GST": float(g_gst_val), "AMOUNT": round(item_amt, 2)
