@@ -603,7 +603,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 preview_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
             else:
                 preview_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-                
+
             with p9: s_rate_input = st.number_input("Rate (₹)", min_value=0.0, value=preview_rate, key="g_rate")
             
             submitted_gross = st.form_submit_button("➕ Add Gross Item")
