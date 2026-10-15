@@ -543,7 +543,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
     else:
-        else:
         with st.form("gross_billing_form"):
             sel_prod = st.selectbox("Product (GROSS RATE)", MASTER_LIST, index=0)
             
