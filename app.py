@@ -542,7 +542,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 })
                 st.rerun()
 
-    
     else:
         with st.form("unique_gross_billing_form"):
             sel_prod = st.selectbox("Product (GROSS RATE)", MASTER_LIST, index=0, key="unique_sel_prod_gross")
@@ -601,37 +600,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                     "QTY": float(g_qty_val), "DEAL/FREE": g_deal_val, "MRP": float(g_mrp_val),
                     "DISC (%)": float(g_disc_val), "DISC (₹)": 0.0,
                     "RATE": g_rate_val, "GST": float(g_gst_val), "AMOUNT": round(item_amt, 2)
-                })
-                st.rerun()
-            
-            def_batch, def_exp = get_latest_batch_expiry(sel_prod)
-            
-            p1, p2, p3, p4, p5, p6, p7, p8, p9 = st.columns(9)
-            with p1: s_qty = st.number_input("Qty", min_value=0, value=0, key="g_qty")
-            with p2: m_pack = st.text_input("Pack", value=def_pack, key="g_pack")
-            with p3: m_batch = st.text_input("Batch", value=def_batch, key="g_batch")
-            with p4: m_exp = st.text_input("Expiry", value=def_exp, key="g_exp")
-            with p5: s_deal = st.text_input("Deal", value="00", key="g_deal")
-            with p6: s_mrp = st.number_input("MRP (₹)", min_value=0.0, value=def_mrp, key="g_mrp")
-            with p7: s_gst_rate = st.number_input("GST (%)", min_value=0.0, value=def_tax, step=1.0, key="g_gst")
-            with p8: s_disc_pct = st.number_input("Disc (%)", min_value=0.0, max_value=100.0, value=0.0, key="g_disc")
-            
-            if s_disc_pct > 0:
-                preview_rate = round(s_mrp * (1 - (s_disc_pct / 100.0)), 2)
-            else:
-                preview_rate = round((s_mrp * 80.0) / (100.0 + s_gst_rate), 2)
-
-            with p9: s_rate_input = st.number_input("Rate (₹)", min_value=0.0, value=preview_rate, key="g_rate")
-            
-            submitted_gross = st.form_submit_button("➕ Add Gross Item")
-            if submitted_gross:
-                calc_rate = s_rate_input
-                amt = float(s_qty) * calc_rate
-                st.session_state["scanned_cart"].append({
-                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
-                    "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
-                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
-                    "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
                 })
                 st.rerun()
 
@@ -700,7 +668,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
         if st.button("🗑️ Clear Entire List"):
             st.session_state["scanned_cart"] = []
             st.rerun()
-
 # ==========================================
 # 2. SALES HISTORY
 # ==========================================
