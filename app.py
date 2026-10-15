@@ -543,6 +543,7 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 st.rerun()
 
     else:
+        else:
         with st.form("gross_billing_form"):
             sel_prod = st.selectbox("Product (GROSS RATE)", MASTER_LIST, index=0)
             
@@ -553,7 +554,6 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             
             if sel_prod != "00" and not MASTER_DF.empty:
                 for idx, row in MASTER_DF.iterrows():
-                    # Get product name from any common column variation
                     p_val = str(row.get("product_name", row.get("PRODUCT_NAME", row.get("Product", "")))).strip()
                     if p_val.upper() == str(sel_prod).strip().upper():
                         def_pack = str(row.get("pack", row.get("PACK", "00")))
@@ -592,33 +592,18 @@ if active_tab == "🤖 AI Smart Scan & Billing":
                 
             with p9: 
                 s_rate_input = st.number_input("Rate (₹)", min_value=0.0, value=float(preview_rate), key="g_rate")
-                
-                if not match_rows.empty:
-                    row = match_rows.iloc[0]
-                    def_pack = str(row.get("pack", "00"))
-                    def_mrp = float(row.get("mrp", 0.0)) if pd.notna(row.get("mrp", 0.0)) else 0.0
-                    def_tax = float(row.get("tax", 5.0)) if pd.notna(row.get("tax", 5.0)) else 5.0
-                    
-                    stored_rate = row.get("rate", 0.0)
-                    if pd.notna(stored_rate) and float(stored_rate) > 0:
-                        def_rate = float(stored_rate)
-                    else:
-                        def_rate = round((def_mrp * 80.0) / (100.0 + def_tax), 2)
-                
-                if not match_rows.empty:
-                    row = match_rows.iloc[0]
-                    # Check keys case-insensitively from row index
-                    row_dict = {str(k).strip().lower(): v for k, v in row.to_dict().items()}
-                    
-                    def_pack = str(row_dict.get("pack", "00"))
-                    def_mrp = float(row_dict.get("mrp", 0.0)) if pd.notna(row_dict.get("mrp", 0.0)) else 0.0
-                    def_tax = float(row_dict.get("tax", 5.0)) if pd.notna(row_dict.get("tax", 5.0)) else 5.0
-                    
-                    stored_rate = row_dict.get("rate", 0.0)
-                    if pd.notna(stored_rate) and float(stored_rate) > 0:
-                        def_rate = float(stored_rate)
-                    else:
-                        def_rate = round((def_mrp * 80.0) / (100.0 + def_tax), 2)
+            
+            submitted_gross = st.form_submit_button("➕ Add Gross Item")
+            if submitted_gross:
+                calc_rate = s_rate_input
+                amt = float(s_qty) * calc_rate
+                st.session_state["scanned_cart"].append({
+                    "PRODUCT": sel_prod, "PACK": m_pack, "BATCH": m_batch, "EXPIRY": m_exp,
+                    "QTY": float(s_qty), "DEAL/FREE": s_deal, "MRP": float(s_mrp),
+                    "DISC (%)": float(s_disc_pct), "DISC (₹)": 0.0,
+                    "RATE": calc_rate, "GST": float(s_gst_rate), "AMOUNT": round(amt, 2)
+                })
+                st.rerun()
             
             def_batch, def_exp = get_latest_batch_expiry(sel_prod)
             
