@@ -550,13 +550,28 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             def_mrp = 0.0
             def_tax = 5.0
             def_rate = 0.0
+            
             if sel_prod != "00" and not MASTER_DF.empty:
-                m_match = MASTER_DF[MASTER_DF["product_name"] == sel_prod]
-                if not m_match.empty:
-                    def_pack = str(m_match["pack"].values[0])
-                    def_mrp = float(m_match["mrp"].values[0])
-                    def_tax = float(m_match["tax"].values[0]) if "tax" in m_match.columns else 5.0
-                    def_rate = float(m_match["rate"].values[0]) if "rate" in m_match.columns else round((def_mrp * 80.0) / (100.0 + def_tax), 2)
+                # Direct safe lookup for product row
+                match_rows = MASTER_DF[MASTER_DF["product_name"].astype(str).str.strip().str.upper() == str(sel_prod).strip().str.upper() if "product_name" in MASTER_DF.columns else False]
+                # Fallback if product_name column casing differs
+                if match_rows.empty and "PRODUCT_NAME" in MASTER_DF.columns:
+                    match_rows = MASTER_DF[MASTER_DF["PRODUCT_NAME"].astype(str).str.strip().str.upper() == str(sel_prod).strip().str.upper()]
+                
+                if not match_rows.empty:
+                    row = match_rows.iloc[0]
+                    # Check keys case-insensitively from row index
+                    row_dict = {str(k).strip().lower(): v for k, v in row.to_dict().items()}
+                    
+                    def_pack = str(row_dict.get("pack", "00"))
+                    def_mrp = float(row_dict.get("mrp", 0.0)) if pd.notna(row_dict.get("mrp", 0.0)) else 0.0
+                    def_tax = float(row_dict.get("tax", 5.0)) if pd.notna(row_dict.get("tax", 5.0)) else 5.0
+                    
+                    stored_rate = row_dict.get("rate", 0.0)
+                    if pd.notna(stored_rate) and float(stored_rate) > 0:
+                        def_rate = float(stored_rate)
+                    else:
+                        def_rate = round((def_mrp * 80.0) / (100.0 + def_tax), 2)
             
             def_batch, def_exp = get_latest_batch_expiry(sel_prod)
             
