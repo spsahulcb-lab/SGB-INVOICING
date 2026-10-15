@@ -552,11 +552,25 @@ if active_tab == "🤖 AI Smart Scan & Billing":
             def_rate = 0.0
             
             if sel_prod != "00" and not MASTER_DF.empty:
-                # Direct safe lookup for product row
-                match_rows = MASTER_DF[MASTER_DF["product_name"].astype(str).str.strip().str.upper() == str(sel_prod).strip().str.upper() if "product_name" in MASTER_DF.columns else False]
-                # Fallback if product_name column casing differs
-                if match_rows.empty and "PRODUCT_NAME" in MASTER_DF.columns:
-                    match_rows = MASTER_DF[MASTER_DF["PRODUCT_NAME"].astype(str).str.strip().str.upper() == str(sel_prod).strip().str.upper()]
+                # Clean column names
+                MASTER_DF.columns = [str(c).strip().lower() for c in MASTER_DF.columns]
+                
+                # Find matching product safely
+                match_rows = pd.DataFrame()
+                if "product_name" in MASTER_DF.columns:
+                    match_rows = MASTER_DF[MASTER_DF["product_name"].astype(str).str.strip().str.upper() == str(sel_prod).strip().upper()]
+                
+                if not match_rows.empty:
+                    row = match_rows.iloc[0]
+                    def_pack = str(row.get("pack", "00"))
+                    def_mrp = float(row.get("mrp", 0.0)) if pd.notna(row.get("mrp", 0.0)) else 0.0
+                    def_tax = float(row.get("tax", 5.0)) if pd.notna(row.get("tax", 5.0)) else 5.0
+                    
+                    stored_rate = row.get("rate", 0.0)
+                    if pd.notna(stored_rate) and float(stored_rate) > 0:
+                        def_rate = float(stored_rate)
+                    else:
+                        def_rate = round((def_mrp * 80.0) / (100.0 + def_tax), 2)
                 
                 if not match_rows.empty:
                     row = match_rows.iloc[0]
