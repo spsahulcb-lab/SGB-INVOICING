@@ -292,7 +292,8 @@ if "GEMINI_API_KEY" in st.secrets:
 
 def process_bill_with_gemini(uploaded_file, text_input, master_df):
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        # Use the correct generative model name compatible with current API
+        model = genai.GenerativeModel('gemini-2.5-flash')
         master_list = master_df["product_name"].tolist() if not master_df.empty else []
         
         prompt = f"""
